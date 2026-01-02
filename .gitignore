@@ -1,0 +1,91 @@
+# Environment and secrets
+.env
+*.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+.venv_temp/
+venv/
+ENV/
+env/
+test_venv/
+audio_test_env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Database
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
+
+# Logs
+logs/
+*.log
+
+# Temp files
+.temp/
+tmp/
+temp/
+*.tmp
+nul
+
+# Audio files (large/copyrighted)
+sample_audio/
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+*.wma
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+.docker/
+
+# Session/state files
+*.jsonl
+web_test_results.json
+mock_server.log

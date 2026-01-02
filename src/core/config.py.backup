@@ -1,0 +1,134 @@
+"""
+Configuration management for AI DJ System with TTS Integration
+"""
+
+import os
+import json
+from typing import List, Optional, Dict
+from pydantic_settings import BaseSettings
+from pydantic import Field
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables"""
+    
+    # Database
+    database_url: str = Field(
+        default="sqlite:///ai_dj.db",
+        description="Database connection URL"
+    )
+    
+    # API Keys
+    openai_api_key: str = Field(
+        description="OpenAI API key for AI analysis"
+    )
+    genius_api_token: Optional[str] = Field(
+        default=None,
+        description="Genius API token for lyrics fetching"
+    )
+    weather_api_key: Optional[str] = Field(
+        default=None,
+        description="Weather API key for contextual awareness"
+    )
+    
+    # Location and Context
+    location: str = Field(
+        default="Denver, CO",
+        description="Geographic location for context awareness"
+    )
+    
+    # Music Library
+    music_directories: List[str] = Field(
+        default_factory=list,
+        description="List of music directories to monitor"
+    )
+    
+    # TTS-WebUI Configuration (OpenAI-compatible)
+    tts_webui_url: str = Field(
+        default="http://localhost:7860",
+        description="TTS-WebUI API endpoint"
+    )
+    tts_voice_model: str = Field(
+        default="alloy",
+        description="Default TTS voice model (OpenAI voice names)"
+    )
+    tts_speed: float = Field(
+        default=1.0,
+        description="Default speech speed multiplier"
+    )
+    tts_pitch: float = Field(
+        default=1.0,
+        description="Default speech pitch multiplier"
+    )
+    tts_emotion: str = Field(
+        default="conversational",
+        description="Default speech emotion/style"
+    )
+    tts_quality: str = Field(
+        default="tts-1",
+        description="TTS audio quality setting (tts-1 or tts-1-hd)"
+    )
+    
+    # Voice Scheduling
+    voice_schedule: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Time-based voice scheduling"
+    )
+    
+    # Audio Processing
+    supported_formats: List[str] = Field(
+        default=[".mp3", ".flac", ".wav", ".m4a", ".ogg"],
+        description="Supported audio file formats"
+    )
+    
+    # Streaming
+    icecast_host: str = Field(default="localhost")
+    icecast_port: int = Field(default=8000)
+    icecast_password: str = Field(
+        default="change_this_password_in_production",
+        description="Icecast source password - MUST be changed in production"
+    )
+    stream_mount: str = Field(default="/ai_dj_stream")
+    
+    # AI Configuration
+    dj_personality: str = Field(
+        default="conversational",
+        description="DJ personality style: conversational, professional, poetic"
+    )
+    knowledge_depth: str = Field(
+        default="deep",
+        description="Knowledge depth: surface, moderate, deep"
+    )
+    trivia_frequency: str = Field(
+        default="moderate",
+        description="Trivia frequency: rare, moderate, frequent"
+    )
+    context_awareness: bool = Field(
+        default=True,
+        description="Enable contextual awareness features"
+    )
+    
+    # Performance
+    max_analysis_workers: int = Field(default=3)
+    batch_size: int = Field(default=50)
+    cache_size_mb: int = Field(default=256)
+    
+    # Redis for background tasks
+    redis_url: str = Field(default="redis://localhost:6379")
+    
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        
+        @classmethod
+        def parse_env_var(cls, field_name: str, raw_val: str):
+            if field_name == "music_directories":
+                return [path.strip() for path in raw_val.split(",") if path.strip()]
+            elif field_name == "voice_schedule":
+                try:
+                    return json.loads(raw_val)
+                except json.JSONDecodeError:
+                    return {}
+            return cls.json_loads(raw_val)
+
+# Global settings instance
+settings = Settings()
