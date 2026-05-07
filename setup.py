@@ -18,24 +18,28 @@ from src.core.file_monitor import FileMonitor
 
 async def init_db():
     """Initialize the database"""
-    print("🔧 Initializing database...")
+    print("Initializing database...")
     await init_database(settings.database_url)
-    print("✅ Database initialized successfully!")
+    print("Database initialized successfully")
 
 def scan_music(music_path: str = None):
     """Scan music directories"""
     directories = [music_path] if music_path else settings.music_directories
-    
+
     if not directories:
-        print("❌ No music directories specified")
+        print("No music directories specified")
         return
-    
-    print(f"🔍 Scanning music directories: {directories}")
-    
+
+    # FileMonitor uses the module-level db_manager singleton, which is only
+    # populated by init_database(). Initialize it before scanning.
+    asyncio.run(init_database(settings.database_url))
+
+    print(f"Scanning music directories: {directories}")
+
     monitor = FileMonitor(directories, settings.database_url)
     monitor.initial_scan()
-    
-    print("✅ Music scan completed!")
+
+    print("Music scan completed")
 
 def main():
     parser = argparse.ArgumentParser(description="Radio Free Luna Setup")

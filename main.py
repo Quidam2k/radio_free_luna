@@ -13,6 +13,14 @@ import threading
 from pathlib import Path
 from typing import List
 
+# Windows: switch console streams to UTF-8 so emoji in log messages don't
+# raise UnicodeEncodeError under the default cp1252 codepage. No-op on
+# platforms whose stdout is already UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from fastapi import FastAPI, WebSocket, Request, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -45,7 +53,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('ai_dj.log'),
+        logging.FileHandler('ai_dj.log', encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -333,13 +341,7 @@ class RadioFreeLuna:
                     "context": "/api/context",
                     "sessions": "/api/sessions",
                     "commentary": "/api/commentary",
-                    "test_voice": "/api/test-voice",
-                    "streaming_status": "/api/streaming/status",
-                    "streaming_start": "/api/streaming/start",
-                    "streaming_stop": "/api/streaming/stop",
-                    "streaming_pause": "/api/streaming/pause",
-                    "streaming_resume": "/api/streaming/resume",
-                    "streaming_skip": "/api/streaming/skip"
+                    "test_voice": "/api/test-voice"
                 }
             }
     
@@ -351,20 +353,20 @@ class RadioFreeLuna:
     
     async def startup(self):
         """Initialize all system components"""
-        logger.info("🎵 Starting Radio Free Luna - AI DJ System...")
-        
+        logger.info("Starting Radio Free Luna - AI DJ System...")
+
         # Initialize database
-        logger.info("📊 Initializing database...")
+        logger.info("Initializing database...")
         await init_database(settings.database_url)
-        
+
         # Initialize AI systems
-        logger.info("🧠 Initializing AI analysis systems...")
+        logger.info("Initializing AI analysis systems...")
         self.music_analyzer = MusicAnalysisEngine(settings.openai_api_key)
         self.session_manager = SessionManager(settings.database_url, settings.openai_api_key)
         self.commentary_generator = DJCommentaryGenerator(settings.openai_api_key)
         
         # Initialize context monitoring
-        logger.info("🌍 Starting contextual awareness monitoring...")
+        logger.info("Starting contextual awareness monitoring...")
         await self.context_manager.update_context()  # Initial context update
 
         # Create monitoring task with proper exception handling
@@ -383,43 +385,43 @@ class RadioFreeLuna:
         context_task.add_done_callback(_handle_context_task_exception)
         
         # Initialize TTS voice system
-        logger.info("🎤 Initializing voice synthesis system...")
+        logger.info("Initializing voice synthesis system...")
         try:
             self.tts_client = TTSWebUIClient(self.tts_config)
             await self.tts_client.initialize()
 
             # Test TTS connection
             if await self.tts_client.test_connection():
-                logger.info("✅ TTS voice system ready")
+                logger.info("TTS voice system ready")
                 self.voice_adapter = ContextualVoiceAdapter(self.tts_client)
             else:
-                logger.warning("⚠️  TTS-WebUI not available, continuing without voice synthesis")
+                logger.warning("TTS-WebUI not available, continuing without voice synthesis")
                 await self.tts_client.shutdown()
                 self.tts_client = None
         except Exception as e:
-            logger.error(f"❌ Failed to initialize TTS system: {e}")
+            logger.error(f"Failed to initialize TTS system: {e}")
             logger.info("Continuing without voice synthesis...")
             self.tts_client = None
-        
+
         # Start file monitoring
         if settings.music_directories:
-            logger.info(f"📁 Starting file monitoring for: {settings.music_directories}")
+            logger.info(f"Starting file monitoring for: {settings.music_directories}")
             self.file_monitor = FileMonitor(
                 settings.music_directories,
                 settings.database_url
             )
             
             # Perform initial scan
-            logger.info("🔍 Performing initial library scan...")
+            logger.info("Performing initial library scan...")
             self.file_monitor.initial_scan()
-            
+
             # Start monitoring
             self.file_monitor.start()
         else:
-            logger.warning("⚠️  No music directories configured")
-        
+            logger.warning("No music directories configured")
+
         # Initialize streaming system
-        logger.info("🎵 Initializing audio streaming system...")
+        logger.info("Initializing audio streaming system...")
         self.stream_manager = StreamManager(
             host=settings.icecast_host,
             port=settings.icecast_port,
@@ -429,23 +431,23 @@ class RadioFreeLuna:
         
         try:
             await self.stream_manager.initialize()
-            logger.info("✅ Audio streaming system ready")
+            logger.info("Audio streaming system ready")
         except Exception as e:
-            logger.error(f"❌ Failed to initialize streaming system: {e}")
+            logger.error(f"Failed to initialize streaming system: {e}")
             logger.info("Continuing without streaming capabilities...")
             self.stream_manager = None
-        
-        logger.info("🎉 Radio Free Luna startup complete!")
-        logger.info("🎯 The AI DJ is now aware of context and ready to create perfect musical moments")
-        
+
+        logger.info("Radio Free Luna startup complete")
+        logger.info("The AI DJ is now aware of context and ready to create perfect musical moments")
+
         if self.stream_manager:
-            logger.info(f"📻 Streaming available at: http://{settings.icecast_host}:{settings.icecast_port}{settings.stream_mount}")
+            logger.info(f"Streaming available at: http://{settings.icecast_host}:{settings.icecast_port}{settings.stream_mount}")
         else:
-            logger.info("📻 Streaming not available - check configuration")
+            logger.info("Streaming not available - check configuration")
     
     async def shutdown(self):
         """Cleanup system components"""
-        logger.info("🛑 Shutting down Radio Free Luna...")
+        logger.info("Shutting down Radio Free Luna...")
 
         # Cancel all background tasks gracefully
         if self.background_tasks:
@@ -465,22 +467,22 @@ class RadioFreeLuna:
                 logger.warning("Some background tasks did not complete within timeout")
 
         if self.file_monitor:
-            logger.info("📁 Stopping file monitor...")
+            logger.info("Stopping file monitor...")
             self.file_monitor.stop()
-        
+
         if self.context_manager:
-            logger.info("🌍 Stopping context monitoring...")
+            logger.info("Stopping context monitoring...")
             await self.context_manager.stop_monitoring()
-        
+
         if self.tts_client:
-            logger.info("🎤 Stopping TTS client...")
+            logger.info("Stopping TTS client...")
             await self.tts_client.shutdown()
-        
+
         if self.stream_manager:
-            logger.info("📻 Stopping streaming system...")
+            logger.info("Stopping streaming system...")
             await self.stream_manager.shutdown()
-        
-        logger.info("👋 Radio Free Luna shutdown complete!")
+
+        logger.info("Radio Free Luna shutdown complete")
 
 # Global application instance with thread-safe access
 _app_lock = threading.Lock()
@@ -521,7 +523,8 @@ async def main():
     
     # Setup signal handlers (must be before creating app_instance so shutdown handler can access it)
     signal.signal(signal.SIGINT, handle_shutdown)
-    signal.signal(signal.SIGTERM, handle_shutdown)
+    if sys.platform != 'win32':
+        signal.signal(signal.SIGTERM, handle_shutdown)
 
     # Create application (thread-safe)
     with _app_lock:
