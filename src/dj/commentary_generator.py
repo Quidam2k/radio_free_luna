@@ -26,8 +26,11 @@ class CommentarySegment:
     urgency: str = "normal"  # low, normal, high
 
 class DJCommentaryGenerator:
-    def __init__(self, openai_api_key: str):
-        self.client = openai.OpenAI(api_key=openai_api_key)
+    def __init__(self, openai_api_key: str, base_url: Optional[str] = None):
+        client_kwargs = {"api_key": openai_api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        self.client = openai.OpenAI(**client_kwargs)
         
         # DJ personality configuration
         self.personality = {

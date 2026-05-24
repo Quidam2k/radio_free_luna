@@ -41,46 +41,43 @@ class BasicCrossfader:
         # Smart crossfading analysis cache
         self.analysis_cache = {}
         
-    def create_crossfade(self, track1: AudioSegment, track2: AudioSegment, 
+    def create_crossfade(self, track1: AudioSegment, track2: AudioSegment,
                         fade_duration_ms: Optional[int] = None,
                         crossfade_type: str = "linear") -> AudioSegment:
         """
         Create a crossfade between two audio tracks.
-        
+
         Args:
             track1: First audio track (will fade out)
             track2: Second audio track (will fade in)
             fade_duration_ms: Duration of crossfade in milliseconds
-            crossfade_type: Type of crossfade (linear, exponential, logarithmic)
-            
+            crossfade_type: Type of crossfade (linear, sine, logarithmic, smart)
+
         Returns:
             AudioSegment: Combined audio with crossfade
         """
         if not HAS_PYDUB:
             logger.warning("pydub not available - returning track2")
             return track2
-        
+
         try:
             fade_duration = fade_duration_ms or self.fade_duration_ms
-            
+
             # Ensure fade duration doesn't exceed track lengths
             fade_duration = min(fade_duration, len(track1), len(track2))
-            
+
             if fade_duration <= 0:
                 logger.warning("Invalid fade duration, concatenating tracks")
                 return track1 + track2
-            
+
             # Get the fade portions
             track1_fade_out = track1[-fade_duration:]
             track2_fade_in = track2[:fade_duration]
-            
+
             # Apply fades based on type
             if crossfade_type == "linear":
                 faded_out = self._apply_linear_fade_out(track1_fade_out)
                 faded_in = self._apply_linear_fade_in(track2_fade_in)
-            elif crossfade_type == "exponential":
-                faded_out = self._apply_exponential_fade_out(track1_fade_out)
-                faded_in = self._apply_exponential_fade_in(track2_fade_in)
             elif crossfade_type == "sine":
                 faded_out = self._apply_sine_fade_out(track1_fade_out)
                 faded_in = self._apply_sine_fade_in(track2_fade_in)
@@ -114,45 +111,6 @@ class BasicCrossfader:
     def _apply_linear_fade_in(self, audio: AudioSegment) -> AudioSegment:
         """Apply linear fade in to audio segment."""
         return audio.fade_in(len(audio))
-    
-    def _apply_exponential_fade_out(self, audio: AudioSegment) -> AudioSegment:
-        """Apply exponential fade out to audio segment."""
-        # For exponential fade, use multiple linear fades
-        duration = len(audio)
-        result = audio
-        
-        # Create exponential curve by applying multiple smaller fades
-        segments = 5
-        segment_duration = duration // segments
-        
-        for i in range(segments):
-            start = i * segment_duration
-            end = start + segment_duration
-            segment = result[start:end]
-            fade_amount = int(segment_duration * (i + 1) / segments)
-            faded_segment = segment.fade_out(fade_amount)
-            result = result[:start] + faded_segment + result[end:]
-        
-        return result
-    
-    def _apply_exponential_fade_in(self, audio: AudioSegment) -> AudioSegment:
-        """Apply exponential fade in to audio segment."""
-        # Similar to fade out but in reverse
-        duration = len(audio)
-        result = audio
-        
-        segments = 5
-        segment_duration = duration // segments
-        
-        for i in range(segments):
-            start = i * segment_duration
-            end = start + segment_duration
-            segment = result[start:end]
-            fade_amount = int(segment_duration * (segments - i) / segments)
-            faded_segment = segment.fade_in(fade_amount)
-            result = result[:start] + faded_segment + result[end:]
-        
-        return result
     
     def _apply_logarithmic_fade_out(self, audio: AudioSegment) -> AudioSegment:
         """Apply logarithmic fade out to audio segment."""
@@ -223,17 +181,14 @@ class BasicCrossfader:
             dynamics_diff = abs(track1_analysis["dynamics"] - track2_analysis["dynamics"])
             
             # Decision logic for optimal crossfade
-            if energy_diff > 0.4:
-                # High energy difference - use exponential for dramatic transition
-                return "exponential"
-            elif dynamics_diff > 0.3:
-                # Different dynamics - use sine for smooth transition
+            if dynamics_diff > 0.3:
+                # Different dynamics - use sine for smooth S-curve transition
                 return "sine"
             elif energy_diff < 0.1 and dynamics_diff < 0.1:
                 # Very similar tracks - use linear for clean transition
                 return "linear"
             else:
-                # Moderate differences - use logarithmic for balanced transition
+                # Moderate / large energy differences - logarithmic feels natural
                 return "logarithmic"
                 
         except Exception as e:

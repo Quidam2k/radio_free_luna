@@ -50,20 +50,51 @@
                 </div>
             </section>
 
-            <!-- Session Management Section -->
+            <!-- Live Broadcast Section -->
+            <section class="card" id="broadcastSection">
+                <h2>Live Broadcast</h2>
+                <form id="streamForm" class="session-form">
+                    <div class="form-group">
+                        <label for="streamTheme">Theme:</label>
+                        <select id="streamTheme" name="theme">
+                            <option value="contextual">Contextual (Based on current mood)</option>
+                            <option value="rainy_day">Rainy Day</option>
+                            <option value="upbeat">Upbeat &amp; Energetic</option>
+                            <option value="relaxing">Relaxing &amp; Chill</option>
+                            <option value="nostalgic">Nostalgic Journey</option>
+                            <option value="driving">Road Trip Vibes</option>
+                            <option value="love">Love &amp; Romance</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="streamDuration">Duration (minutes):</label>
+                        <input type="number" id="streamDuration" name="duration" min="5" max="480" value="30">
+                    </div>
+                    <div class="stream-controls">
+                        <button type="submit" class="btn btn-primary" id="streamStartBtn">Start &amp; Listen</button>
+                        <button type="button" class="btn btn-secondary" id="streamStopBtn">Stop</button>
+                        <button type="button" class="btn btn-secondary" id="streamSkipBtn">Skip</button>
+                    </div>
+                </form>
+                <audio id="streamAudio" controls preload="none" style="width: 100%; margin-top: 12px;"></audio>
+                <div id="streamResult" class="session-result"></div>
+            </section>
+
+            <!-- Session Management Section (dry-run) -->
             <section class="card" id="sessionManagement">
-                <h2>Create AI DJ Session</h2>
+                <h2>Create Dry-Run Session</h2>
+                <p style="font-size: 0.9em; opacity: 0.8;">Build a session without broadcasting. Useful for inspecting track sequencing.</p>
                 <form id="sessionForm" class="session-form">
                     <div class="form-group">
                         <label for="sessionTheme">Theme:</label>
                         <select id="sessionTheme" name="theme">
                             <option value="contextual">Contextual (Based on current mood)</option>
                             <option value="rainy_day">Rainy Day</option>
-                            <option value="upbeat">Upbeat & Energetic</option>
-                            <option value="relaxing">Relaxing & Chill</option>
+                            <option value="upbeat">Upbeat &amp; Energetic</option>
+                            <option value="relaxing">Relaxing &amp; Chill</option>
                             <option value="nostalgic">Nostalgic Journey</option>
                             <option value="driving">Road Trip Vibes</option>
-                            <option value="love">Love & Romance</option>
+                            <option value="love">Love &amp; Romance</option>
                         </select>
                     </div>
                     <div class="form-group">

@@ -11,7 +11,7 @@ import signal
 import sys
 import threading
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 # Windows: switch console streams to UTF-8 so emoji in log messages don't
 # raise UnicodeEncodeError under the default cp1252 codepage. No-op on
@@ -21,10 +21,10 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from fastapi import FastAPI, WebSocket, Request, Body
+from fastapi import FastAPI, HTTPException, WebSocket, Request, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 import uvicorn
 
 # Import our modules
@@ -42,7 +42,7 @@ from src.context.context_manager import ContextManager
 from src.context.temporal import TemporalAnalyzer
 from src.context.weather import WeatherAnalyzer
 from src.context.location import LocationAnalyzer
-from src.streaming.stream_manager import StreamManager
+from src.streaming.broadcaster import Broadcaster
 from src.models import (
     SessionRequest, TestVoiceRequest, CommentaryRequest,
     ValidationError, ValidationHelpers
@@ -100,7 +100,7 @@ class RadioFreeLuna:
         self.tts_client = None
         self.voice_adapter = None
         self.file_monitor = None
-        self.stream_manager = None
+        self.broadcaster: Optional[Broadcaster] = None
 
         # Track background tasks for proper cleanup
         self.background_tasks: List[asyncio.Task] = []
@@ -123,7 +123,7 @@ class RadioFreeLuna:
                     "context_manager": "active" if self.context_manager else "inactive",
                     "tts_system": "connected" if self.tts_client else "disconnected",
                     "file_monitor": "active" if self.file_monitor and self.file_monitor.is_running else "inactive",
-                    "stream_manager": "active" if self.stream_manager and self.stream_manager.is_initialized else "inactive"
+                    "broadcaster": "active" if self.broadcaster and self.broadcaster.is_active else ("idle" if self.broadcaster else "inactive")
                 }
             }
         
@@ -149,11 +149,9 @@ class RadioFreeLuna:
                     "commentary_generator": bool(self.commentary_generator),
                     "voice_synthesis": bool(self.tts_client)
                 },
-                "streaming": {
-                    "stream_manager": bool(self.stream_manager),
-                    "is_streaming": self.stream_manager.audio_server.is_streaming if self.stream_manager else False,
-                    "current_session": self.stream_manager.current_session_id if self.stream_manager else None
-                }
+                "streaming": (
+                    self.broadcaster.current_status() if self.broadcaster else {"active": False}
+                )
             }
         
         # Test TTS voice
@@ -223,19 +221,13 @@ class RadioFreeLuna:
                     "context": self.context_manager.generate_context_description()
                 }
                 
-                # Start streaming if requested
-                if start_streaming and self.stream_manager:
-                    stream_session_id = await self.stream_manager.create_and_stream_session(
-                        self.session_manager, theme, duration_minutes, context
-                    )
-                    if stream_session_id:
-                        result["streaming"] = True
-                        result["stream_session_id"] = stream_session_id
-                        result["stream_info"] = self.stream_manager.get_stream_status()
-                    else:
-                        result["streaming"] = False
-                        result["stream_error"] = "Failed to start streaming"
-                
+                # The dedicated /api/streaming/start endpoint is the way to
+                # actually broadcast a session. This endpoint is now dry-run
+                # session creation only (no audio output). The start_streaming
+                # parameter is accepted for backwards compatibility but ignored.
+                if start_streaming and self.broadcaster:
+                    result["streaming_hint"] = "Use POST /api/streaming/start to broadcast"
+
                 return result
 
             except ValidationError as e:
@@ -337,13 +329,98 @@ class RadioFreeLuna:
                 "context_aware": bool(self.context_manager),
                 "endpoints": {
                     "health": "/health",
-                    "status": "/status", 
+                    "status": "/status",
                     "context": "/api/context",
                     "sessions": "/api/sessions",
                     "commentary": "/api/commentary",
-                    "test_voice": "/api/test-voice"
+                    "test_voice": "/api/test-voice",
+                    "stream": "/stream.mp3",
+                    "streaming_start": "/api/streaming/start",
+                    "streaming_stop": "/api/streaming/stop",
+                    "streaming_skip": "/api/streaming/skip",
+                    "streaming_status": "/api/streaming/status"
                 }
             }
+
+        # ---- streaming endpoints ----
+
+        @self.app.get("/stream.mp3")
+        async def stream_mp3():
+            """Live MP3 broadcast. Returns 503 when no session is active."""
+            if not self.broadcaster or not self.broadcaster.is_active:
+                raise HTTPException(status_code=503, detail="No active session — POST /api/streaming/start first")
+
+            queue = await self.broadcaster.register_listener()
+
+            async def generator():
+                try:
+                    while True:
+                        chunk = await queue.get()
+                        if chunk is None:
+                            break
+                        yield chunk
+                finally:
+                    if self.broadcaster:
+                        await self.broadcaster.unregister_listener(queue)
+
+            return StreamingResponse(
+                generator(),
+                media_type="audio/mpeg",
+                headers={"Cache-Control": "no-cache, no-store", "Pragma": "no-cache"},
+            )
+
+        @self.app.post("/api/streaming/start")
+        async def streaming_start(
+            theme: str = Body(..., description="Music theme"),
+            duration_minutes: int = Body(60, description="Session length in minutes (5-480)")
+        ):
+            """Create a themed session and start broadcasting it on /stream.mp3."""
+            try:
+                request = SessionRequest(theme=theme, duration_minutes=duration_minutes)
+
+                if not self.broadcaster:
+                    return {"error": "Broadcaster not initialized", "status_code": 503}
+
+                context = self.context_manager.get_current_context()
+                if not context:
+                    return {"error": "Context not available"}
+
+                info = await self.broadcaster.start_session(
+                    theme=request.theme,
+                    duration_minutes=request.duration_minutes,
+                    context=context,
+                )
+                info["stream_url"] = "/stream.mp3"
+                return info
+
+            except ValidationError as e:
+                logger.warning(f"Streaming start validation error: {e}")
+                return {"error": "Validation Failed", "detail": str(e), "status_code": 422}
+            except Exception as e:
+                logger.error(f"Failed to start broadcast: {e}", exc_info=True)
+                return {"error": str(e)}
+
+        @self.app.post("/api/streaming/stop")
+        async def streaming_stop():
+            """Stop the active broadcast (if any)."""
+            if not self.broadcaster:
+                return {"error": "Broadcaster not initialized"}
+            return await self.broadcaster.stop_session()
+
+        @self.app.post("/api/streaming/skip")
+        async def streaming_skip():
+            """Skip immediately to the next track in the active session."""
+            if not self.broadcaster:
+                return {"error": "Broadcaster not initialized"}
+            ok = await self.broadcaster.skip_track()
+            return {"skipped": ok}
+
+        @self.app.get("/api/streaming/status")
+        async def streaming_status():
+            """Detailed broadcaster state."""
+            if not self.broadcaster:
+                return {"active": False, "error": "Broadcaster not initialized"}
+            return self.broadcaster.current_status()
     
     def setup_static_files(self):
         """Setup static file serving"""
@@ -361,9 +438,11 @@ class RadioFreeLuna:
 
         # Initialize AI systems
         logger.info("Initializing AI analysis systems...")
-        self.music_analyzer = MusicAnalysisEngine(settings.openai_api_key)
-        self.session_manager = SessionManager(settings.database_url, settings.openai_api_key)
-        self.commentary_generator = DJCommentaryGenerator(settings.openai_api_key)
+        self.music_analyzer = MusicAnalysisEngine(settings.openai_api_key, base_url=settings.openai_base_url)
+        self.session_manager = SessionManager(
+            settings.database_url, settings.openai_api_key, base_url=settings.openai_base_url
+        )
+        self.commentary_generator = DJCommentaryGenerator(settings.openai_api_key, base_url=settings.openai_base_url)
         
         # Initialize context monitoring
         logger.info("Starting contextual awareness monitoring...")
@@ -420,30 +499,27 @@ class RadioFreeLuna:
         else:
             logger.warning("No music directories configured")
 
-        # Initialize streaming system
-        logger.info("Initializing audio streaming system...")
-        self.stream_manager = StreamManager(
-            host=settings.icecast_host,
-            port=settings.icecast_port,
-            mount=settings.stream_mount,
-            password=settings.icecast_password  # Validated by Pydantic config
-        )
-        
+        # Initialize broadcaster
+        logger.info("Initializing audio broadcaster...")
         try:
-            await self.stream_manager.initialize()
-            logger.info("Audio streaming system ready")
+            self.broadcaster = Broadcaster(
+                session_manager=self.session_manager,
+                bitrate_kbps=settings.stream_bitrate_kbps,
+            )
+            await self.broadcaster.start()
+            logger.info("Audio broadcaster ready")
         except Exception as e:
-            logger.error(f"Failed to initialize streaming system: {e}")
-            logger.info("Continuing without streaming capabilities...")
-            self.stream_manager = None
+            logger.error(f"Failed to initialize broadcaster: {e}", exc_info=True)
+            logger.info("Continuing without broadcasting capabilities...")
+            self.broadcaster = None
 
         logger.info("Radio Free Luna startup complete")
         logger.info("The AI DJ is now aware of context and ready to create perfect musical moments")
 
-        if self.stream_manager:
-            logger.info(f"Streaming available at: http://{settings.icecast_host}:{settings.icecast_port}{settings.stream_mount}")
+        if self.broadcaster:
+            logger.info("Broadcaster idle. Start a session via POST /api/streaming/start, listen at /stream.mp3")
         else:
-            logger.info("Streaming not available - check configuration")
+            logger.info("Broadcaster unavailable - audio streaming disabled")
     
     async def shutdown(self):
         """Cleanup system components"""
@@ -478,9 +554,9 @@ class RadioFreeLuna:
             logger.info("Stopping TTS client...")
             await self.tts_client.shutdown()
 
-        if self.stream_manager:
-            logger.info("Stopping streaming system...")
-            await self.stream_manager.shutdown()
+        if self.broadcaster:
+            logger.info("Stopping broadcaster...")
+            await self.broadcaster.stop()
 
         logger.info("Radio Free Luna shutdown complete")
 

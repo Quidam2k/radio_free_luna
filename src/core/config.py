@@ -27,6 +27,11 @@ class Settings:
             'OpenAI API key for AI analysis and commentary'
         )
 
+        # Optional override for any OpenAI-compatible endpoint (LM Studio, Ollama, etc.).
+        # When unset, the openai SDK uses api.openai.com.
+        openai_base_url = os.getenv('OPENAI_BASE_URL', '').strip()
+        self.openai_base_url: Optional[str] = openai_base_url or None
+
         # =========================================================================
         # SECURITY SETTINGS - Validated for production use
         # =========================================================================
@@ -107,6 +112,11 @@ class Settings:
             self.icecast_port = 8000
 
         self.stream_mount = os.getenv('STREAM_MOUNT', '/ai_dj_stream')
+
+        try:
+            self.stream_bitrate_kbps = int(os.getenv('STREAM_BITRATE_KBPS', '128'))
+        except ValueError:
+            self.stream_bitrate_kbps = 128
 
         # =========================================================================
         # PERFORMANCE CONFIGURATION

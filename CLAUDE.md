@@ -233,3 +233,8 @@ This allows development and testing without all external services running.
 9. **Performance**: Database queries can be expensive with large music libraries. Use pagination and caching where appropriate.
 
 10. **Dependencies Location**: Pre-installed dependencies are in `lib/` directory. System should work without additional virtual environment for basic development.
+
+## Migration Note
+This project was moved from H: to Q: on 2026-03-25 as part of a filesystem reorganization.
+Previous location: H:\Development\radio_free_luna
+If you encounter hardcoded paths referencing the old location, update them to the current path.

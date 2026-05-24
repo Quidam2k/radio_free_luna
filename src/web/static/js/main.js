@@ -29,13 +29,30 @@ class RadioFreeLunaUI {
     }
 
     bindEventListeners() {
-        // Session form
+        // Session form (dry-run)
         const sessionForm = document.getElementById('sessionForm');
         if (sessionForm) {
             sessionForm.addEventListener('submit', (e) => {
                 e.preventDefault();
                 this.createSession();
             });
+        }
+
+        // Live broadcast controls
+        const streamForm = document.getElementById('streamForm');
+        if (streamForm) {
+            streamForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.startBroadcast();
+            });
+        }
+        const streamStopBtn = document.getElementById('streamStopBtn');
+        if (streamStopBtn) {
+            streamStopBtn.addEventListener('click', () => this.stopBroadcast());
+        }
+        const streamSkipBtn = document.getElementById('streamSkipBtn');
+        if (streamSkipBtn) {
+            streamSkipBtn.addEventListener('click', () => this.skipTrack());
         }
 
         // Voice testing
@@ -397,6 +414,99 @@ class RadioFreeLunaUI {
             }
         } finally {
             if (btn) btn.disabled = false;
+        }
+    }
+
+    async startBroadcast() {
+        const theme = document.getElementById('streamTheme')?.value || 'contextual';
+        const duration = parseInt(document.getElementById('streamDuration')?.value) || 30;
+        const resultDiv = document.getElementById('streamResult');
+        const audioEl = document.getElementById('streamAudio');
+        const startBtn = document.getElementById('streamStartBtn');
+
+        if (startBtn) startBtn.disabled = true;
+        if (resultDiv) {
+            resultDiv.className = 'session-result show loading';
+            resultDiv.innerHTML = '<p>Starting broadcast (loading tracks)...</p>';
+        }
+
+        try {
+            const info = await this.makeRequest(`${this.apiURL}/streaming/start`, {
+                method: 'POST',
+                body: JSON.stringify({ theme, duration_minutes: duration })
+            });
+
+            if (info.error) {
+                if (resultDiv) {
+                    resultDiv.className = 'session-result show result-error';
+                    resultDiv.innerHTML = `<strong>Failed to start broadcast:</strong> ${info.error}${info.detail ? '<br>' + info.detail : ''}`;
+                }
+                return;
+            }
+
+            if (resultDiv) {
+                resultDiv.className = 'session-result show result-success';
+                resultDiv.innerHTML = `
+                    <strong>Broadcasting!</strong>
+                    <p><strong>Session:</strong> ${info.session_id}</p>
+                    <p><strong>Theme:</strong> ${info.theme}</p>
+                    <p><strong>Tracks:</strong> ${info.track_count}</p>
+                    <p><strong>Estimated:</strong> ${Math.round((info.estimated_duration || 0) / 60)} minutes</p>
+                `;
+            }
+
+            if (audioEl) {
+                audioEl.src = `${this.baseURL}/stream.mp3?t=${Date.now()}`;
+                try {
+                    await audioEl.play();
+                } catch (e) {
+                    console.warn('Autoplay blocked; user must press play on the audio element.', e);
+                }
+            }
+        } catch (error) {
+            console.error('Broadcast start failed:', error);
+            if (resultDiv) {
+                resultDiv.className = 'session-result show result-error';
+                resultDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+            }
+        } finally {
+            if (startBtn) startBtn.disabled = false;
+        }
+    }
+
+    async stopBroadcast() {
+        const audioEl = document.getElementById('streamAudio');
+        const resultDiv = document.getElementById('streamResult');
+        try {
+            const result = await this.makeRequest(`${this.apiURL}/streaming/stop`, { method: 'POST' });
+            if (audioEl) {
+                audioEl.pause();
+                audioEl.removeAttribute('src');
+                audioEl.load();
+            }
+            if (resultDiv) {
+                resultDiv.className = 'session-result show result-info';
+                resultDiv.innerHTML = `<strong>Broadcast stopped.</strong> ${result.session_id ? '(' + result.session_id + ')' : ''}`;
+            }
+        } catch (error) {
+            console.error('Broadcast stop failed:', error);
+            if (resultDiv) {
+                resultDiv.className = 'session-result show result-error';
+                resultDiv.innerHTML = `<strong>Stop error:</strong> ${error.message}`;
+            }
+        }
+    }
+
+    async skipTrack() {
+        const resultDiv = document.getElementById('streamResult');
+        try {
+            const result = await this.makeRequest(`${this.apiURL}/streaming/skip`, { method: 'POST' });
+            if (resultDiv) {
+                resultDiv.className = 'session-result show result-info';
+                resultDiv.innerHTML = `<strong>Skip:</strong> ${result.skipped ? 'queued' : 'no active session'}`;
+            }
+        } catch (error) {
+            console.error('Skip failed:', error);
         }
     }
 

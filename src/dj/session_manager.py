@@ -85,10 +85,10 @@ class DJSessionInfo:
     context_snapshot: Dict
 
 class SessionManager:
-    def __init__(self, database_url: str, openai_api_key: str):
+    def __init__(self, database_url: str, openai_api_key: str, base_url: Optional[str] = None):
         self.database_url = database_url
-        self.music_analyzer = MusicAnalysisEngine(openai_api_key)
-        self.commentary_generator = DJCommentaryGenerator(openai_api_key)
+        self.music_analyzer = MusicAnalysisEngine(openai_api_key, base_url=base_url)
+        self.commentary_generator = DJCommentaryGenerator(openai_api_key, base_url=base_url)
         
         # Session parameters
         self.sequencing_weights = {
@@ -126,12 +126,18 @@ class SessionManager:
                 parameters
             )
             
-            # Generate commentary for the session
-            commentary_segments = await self.generate_session_commentary(
-                sequenced_tracks, 
-                theme, 
-                context
-            )
+            # Generate commentary for the session. Failures here (no API key,
+            # LM Studio not running, malformed responses) must not abort
+            # session creation — Phase 1 doesn't render commentary anyway.
+            try:
+                commentary_segments = await self.generate_session_commentary(
+                    sequenced_tracks,
+                    theme,
+                    context
+                )
+            except Exception as e:
+                logger.warning(f"Commentary generation failed; continuing with empty commentary: {e}")
+                commentary_segments = []
             
             # Store session in database
             await self.store_session(
@@ -164,47 +170,76 @@ class SessionManager:
             raise e
     
     async def find_tracks_for_theme(self, theme: str, context: Dict) -> List[Dict]:
-        """Find tracks that match the theme and context"""
-        
+        """Find tracks that match the theme and context.
+
+        Falls back gracefully when track_analysis is empty: returns all tracks with
+        synthesized default analysis values so the session sequencer can still run.
+        """
+
         session = get_db()
         try:
-            # Query tracks with analysis
-            query = session.query(Track, TrackAnalysis).join(
-                TrackAnalysis, Track.id == TrackAnalysis.track_id
+            # Filter out album-length rips (>15 min) — they're almost certainly
+            # whole-album files, not individual songs, and they dominate any
+            # duration-bounded sequencer.
+            results = (
+                session.query(Track, TrackAnalysis)
+                .outerjoin(TrackAnalysis, Track.id == TrackAnalysis.track_id)
+                .filter(Track.duration <= 900)
+                .all()
             )
-            
-            # Filter by theme in analysis
-            theme_filter = f'%{theme}%'
-            query = query.filter(TrackAnalysis.themes.like(theme_filter))
-            
-            # Apply context-based filtering
-            query = self.apply_contextual_filters(query, context)
-            
-            # Get results
-            results = query.limit(200).all()  # Reasonable limit for processing
-            
-            tracks = []
+
+            theme_lower = (theme or "").lower()
+            tracks_with_analysis: List[Dict] = []
+            tracks_no_analysis: List[Dict] = []
+
             for track, analysis in results:
-                track_dict = {
-                    "id": track.id,
-                    "title": track.title,
-                    "artist": track.artist,
-                    "album": track.album,
-                    "year": track.year,
-                    "genre": track.genre,
-                    "duration": track.duration,
-                    "file_path": track.file_path,
-                    "themes": json.loads(analysis.themes or '[]'),
-                    "mood_valence": analysis.mood_valence,
-                    "energy_level": analysis.energy_level,
-                    "danceability": analysis.danceability,
-                    "summary": analysis.summary,
-                    "cultural_context": analysis.cultural_context
-                }
-                tracks.append(track_dict)
-            
-            return tracks
-            
+                if analysis is not None:
+                    themes = json.loads(analysis.themes or '[]')
+                    track_dict = {
+                        "id": track.id,
+                        "title": track.title,
+                        "artist": track.artist,
+                        "album": track.album,
+                        "year": track.year,
+                        "genre": track.genre,
+                        "duration": track.duration,
+                        "file_path": track.file_path,
+                        "themes": themes,
+                        "mood_valence": analysis.mood_valence,
+                        "energy_level": analysis.energy_level,
+                        "danceability": analysis.danceability,
+                        "summary": analysis.summary,
+                        "cultural_context": analysis.cultural_context,
+                    }
+                    if theme_lower and any(theme_lower in (t or "").lower() for t in themes):
+                        tracks_with_analysis.append(track_dict)
+                else:
+                    tracks_no_analysis.append({
+                        "id": track.id,
+                        "title": track.title,
+                        "artist": track.artist,
+                        "album": track.album,
+                        "year": track.year,
+                        "genre": track.genre,
+                        "duration": track.duration,
+                        "file_path": track.file_path,
+                        "themes": [theme] if theme else [],
+                        "mood_valence": 0.0,
+                        "energy_level": 0.5,
+                        "danceability": 0.5,
+                        "summary": "",
+                        "cultural_context": "",
+                    })
+
+            if tracks_with_analysis:
+                return tracks_with_analysis[:200]
+
+            logger.info(
+                f"No analyzed tracks match theme '{theme}'; "
+                f"falling back to {len(tracks_no_analysis)} unanalyzed tracks"
+            )
+            return tracks_no_analysis[:200]
+
         finally:
             session.close()
     
