@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  radio-free-luna:
+    build: .
+    container_name: radio-free-luna-main
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./music:/app/music:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GENIUS_API_TOKEN=${GENIUS_API_TOKEN}
+      - WEATHER_API_KEY=${WEATHER_API_KEY}
+      - DATABASE_URL=sqlite:////app/data/ai_dj.db
+      - ICECAST_PASSWORD=${ICECAST_PASSWORD}
+      - MUSIC_DIRECTORIES=/app/music
+      - TTS_WEBUI_URL=http://tts-webui:7860
+      - LOCATION=${LOCATION:-Denver, CO}
+      - DJ_PERSONALITY=conversational
+      - KNOWLEDGE_DEPTH=deep
+      - CONTEXT_AWARENESS=true
+    depends_on:
+      tts-webui:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - radio-free-luna-network
+
+  tts-webui:
+    image: rsxdalv/tts-webui:latest
+    container_name: radio-free-luna-tts
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./tts_models:/app/models
+      - ./tts_config:/app/config
+    environment:
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      - API_ENABLED=true
+      - OPENAI_API_ENABLED=true  # Enable OpenAI-compatible API
+    command: ["python", "server.py", "--api", "--listen"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:7860/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - radio-free-luna-network
+
+networks:
+  radio-free-luna-network:
+    driver: bridge

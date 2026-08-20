@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Free Luna - AI DJ System</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="title">🎵 Radio Free Luna</h1>
+            <p class="tagline">Where every song tells a story, and context creates the perfect moment</p>
+            <div class="status-indicator" id="statusIndicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Checking status...</span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- System Status Section -->
+            <section class="card" id="systemStatus">
+                <h2>System Status</h2>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <strong>AI Analysis:</strong>
+                        <span id="aiStatus">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <strong>Voice Synthesis:</strong>
+                        <span id="voiceStatus">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <strong>Context Awareness:</strong>
+                        <span id="contextStatus">Checking...</span>
+                    </div>
+                    <div class="status-item">
+                        <strong>Music Library:</strong>
+                        <span id="musicStatus">Checking...</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Current Context Section -->
+            <section class="card" id="contextInfo">
+                <h2>Current Context</h2>
+                <div id="contextContent">
+                    <p>Loading context information...</p>
+                </div>
+            </section>
+
+            <!-- Live Broadcast Section -->
+            <section class="card" id="broadcastSection">
+                <h2>Live Broadcast</h2>
+                <form id="streamForm" class="session-form">
+                    <div class="form-group">
+                        <label for="streamTheme">Theme:</label>
+                        <select id="streamTheme" name="theme">
+                            <option value="contextual">Contextual (Based on current mood)</option>
+                            <option value="rainy_day">Rainy Day</option>
+                            <option value="upbeat">Upbeat &amp; Energetic</option>
+                            <option value="relaxing">Relaxing &amp; Chill</option>
+                            <option value="nostalgic">Nostalgic Journey</option>
+                            <option value="driving">Road Trip Vibes</option>
+                            <option value="love">Love &amp; Romance</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="streamDuration">Duration (minutes):</label>
+                        <input type="number" id="streamDuration" name="duration" min="5" max="480" value="30">
+                    </div>
+                    <div class="stream-controls">
+                        <button type="submit" class="btn btn-primary" id="streamStartBtn">Start &amp; Listen</button>
+                        <button type="button" class="btn btn-secondary" id="streamStopBtn">Stop</button>
+                        <button type="button" class="btn btn-secondary" id="streamSkipBtn">Skip</button>
+                    </div>
+                </form>
+                <audio id="streamAudio" controls preload="none" style="width: 100%; margin-top: 12px;"></audio>
+                <div id="nowPlaying" class="now-playing" style="display: none; margin-top: 12px;">
+                    <div class="now-playing-label">Now Playing</div>
+                    <div id="nowPlayingTitle" class="now-playing-title"></div>
+                    <div id="nowPlayingMeta" class="now-playing-meta"></div>
+                    <div class="now-playing-bar"><div id="nowPlayingProgress" class="now-playing-progress"></div></div>
+                </div>
+                <div id="streamResult" class="session-result"></div>
+            </section>
+
+            <!-- Request Line Section -->
+            <section class="card" id="requestSection">
+                <h2>Request Line</h2>
+                <p style="font-size: 0.9em; opacity: 0.8;">Ask the DJ for a song — it jumps the queue and gets a shout-out on air.</p>
+                <form id="requestForm" class="session-form">
+                    <div class="form-group">
+                        <label for="requestQuery">Song or artist:</label>
+                        <input type="text" id="requestQuery" name="query" maxlength="200" placeholder="e.g. Moonlight Sonata, or Miles Davis" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="requestName">Your name (spoken on air, optional):</label>
+                        <input type="text" id="requestName" name="requested_by" maxlength="50" placeholder="e.g. Todd">
+                    </div>
+                    <button type="submit" class="btn btn-primary" id="requestBtn">Call It In</button>
+                </form>
+                <div id="requestResult" class="session-result"></div>
+            </section>
+
+            <!-- Session Management Section (dry-run) -->
+            <section class="card" id="sessionManagement">
+                <h2>Create Dry-Run Session</h2>
+                <p style="font-size: 0.9em; opacity: 0.8;">Build a session without broadcasting. Useful for inspecting track sequencing.</p>
+                <form id="sessionForm" class="session-form">
+                    <div class="form-group">
+                        <label for="sessionTheme">Theme:</label>
+                        <select id="sessionTheme" name="theme">
+                            <option value="contextual">Contextual (Based on current mood)</option>
+                            <option value="rainy_day">Rainy Day</option>
+                            <option value="upbeat">Upbeat &amp; Energetic</option>
+                            <option value="relaxing">Relaxing &amp; Chill</option>
+                            <option value="nostalgic">Nostalgic Journey</option>
+                            <option value="driving">Road Trip Vibes</option>
+                            <option value="love">Love &amp; Romance</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="sessionDuration">Duration (minutes):</label>
+                        <input type="number" id="sessionDuration" name="duration" min="15" max="480" value="60">
+                    </div>
+                    <button type="submit" class="btn btn-primary">Create Session</button>
+                </form>
+                <div id="sessionResult" class="session-result"></div>
+            </section>
+
+            <!-- Voice Testing Section -->
+            <section class="card" id="voiceTesting">
+                <h2>Voice Synthesis Test</h2>
+                <div class="voice-test">
+                    <div class="form-group">
+                        <label for="voiceText">Test Text:</label>
+                        <textarea id="voiceText" placeholder="Enter text to synthesize..." rows="3">Hello, this is Radio Free Luna testing the voice synthesis system. The AI DJ is ready to create the perfect musical moment for you.</textarea>
+                    </div>
+                    <button type="button" id="testVoiceBtn" class="btn btn-secondary">Test Voice Synthesis</button>
+                    <div id="voiceResult" class="voice-result"></div>
+                </div>
+            </section>
+
+            <!-- Commentary Generation Section -->
+            <section class="card" id="commentarySection">
+                <h2>Generate DJ Commentary</h2>
+                <div class="commentary-controls">
+                    <button type="button" id="generateContextualBtn" class="btn btn-secondary">Generate Contextual Commentary</button>
+                    <button type="button" id="generateOpeningBtn" class="btn btn-secondary">Generate Opening Commentary</button>
+                    <div id="commentaryResult" class="commentary-result"></div>
+                </div>
+            </section>
+
+            <!-- API Testing Section -->
+            <section class="card" id="apiTesting">
+                <h2>API Testing</h2>
+                <div class="api-controls">
+                    <button type="button" id="healthCheckBtn" class="btn btn-info">Health Check</button>
+                    <button type="button" id="systemStatusBtn" class="btn btn-info">System Status</button>
+                    <button type="button" id="contextCheckBtn" class="btn btn-info">Context Check</button>
+                    <div id="apiResult" class="api-result"></div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <p>&copy; 2024 Radio Free Luna - AI DJ System</p>
+            <p><a href="/docs" target="_blank">API Documentation</a> | <a href="https://github.com/anthropics/claude-code/issues" target="_blank">Report Issues</a></p>
+        </footer>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
