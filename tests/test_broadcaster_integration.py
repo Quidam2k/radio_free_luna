@@ -6,6 +6,7 @@ is unavailable.
 
 import asyncio
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -14,11 +15,40 @@ import pytest
 pydub = pytest.importorskip("pydub")
 from pydub.generators import Sine  # noqa: E402
 
-from src.streaming.broadcaster import Broadcaster  # noqa: E402
-
-pytestmark = pytest.mark.skipif(
-    shutil.which("ffmpeg") is None, reason="ffmpeg not on PATH"
+from src.streaming.broadcaster import (  # noqa: E402
+    Broadcaster,
+    _ensure_venv_scripts_on_path,
+    _RepeatLimiter,
 )
+
+
+def _ffmpeg_skip_reason() -> Optional[str]:
+    """Resolve ffmpeg the way the Broadcaster does and require libmp3lame.
+
+    An ffmpeg without libmp3lame exits immediately, so the listener would
+    just time out instead of failing clearly.
+    """
+    _ensure_venv_scripts_on_path()
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return "ffmpeg not on PATH"
+    try:
+        encoders = subprocess.run(
+            [ffmpeg, "-hide_banner", "-encoders"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        return f"could not query ffmpeg encoders: {e}"
+    if "libmp3lame" not in encoders:
+        return (
+            f"{ffmpeg} lacks the libmp3lame encoder; run with the project venv "
+            "(.venv/Scripts/python.exe -m pytest), whose ffmpeg has it"
+        )
+    return None
+
+
+_SKIP_REASON = _ffmpeg_skip_reason()
+needs_mp3_ffmpeg = pytest.mark.skipif(_SKIP_REASON is not None, reason=_SKIP_REASON or "")
 
 
 @dataclass
@@ -101,6 +131,52 @@ async def _collect_stream(broadcaster, min_bytes=20_000, timeout=30.0):
     return bytes(received)
 
 
+class TestRepeatLimiter:
+    """ffmpeg stderr is logged at WARNING, so per-frame repeats must not spam."""
+
+    def _limiter(self, interval=30.0):
+        now = [0.0]
+        limiter = _RepeatLimiter(interval=interval, clock=lambda: now[0])
+        return limiter, now
+
+    def test_first_occurrence_emitted_repeats_suppressed(self):
+        limiter, _ = self._limiter()
+        assert limiter.feed("Unknown encoder 'libmp3lame'") == ["Unknown encoder 'libmp3lame'"]
+        for _ in range(500):
+            assert limiter.feed("Unknown encoder 'libmp3lame'") == []
+
+    def test_digits_ignored_when_matching(self):
+        limiter, _ = self._limiter()
+        assert limiter.feed("Queue input is backward in time at pts 100") != []
+        assert limiter.feed("Queue input is backward in time at pts 200") == []
+
+    def test_repeat_count_summarized_after_interval(self):
+        limiter, now = self._limiter(interval=30.0)
+        limiter.feed("warn A")
+        for _ in range(9):
+            limiter.feed("warn A")
+        now[0] = 31.0
+        out = limiter.feed("warn A")
+        assert out == ["warn A (repeated 10x)"]
+        # Counter reset: nothing more until the next interval
+        assert limiter.feed("warn A") == []
+
+    def test_flush_reports_pending_and_distinct_lines_pass(self):
+        limiter, _ = self._limiter()
+        assert limiter.feed("warn A") == ["warn A"]
+        assert limiter.feed("warn B") == ["warn B"]
+        limiter.feed("warn A")
+        assert limiter.flush() == ["warn A (repeated 1x)"]
+        assert limiter.flush() == []
+
+    def test_key_cap_bounds_memory(self):
+        limiter = _RepeatLimiter(max_keys=3, clock=lambda: 0.0)
+        for word in ["a", "b", "c", "d", "e"]:
+            assert limiter.feed(f"line {word}") == [f"line {word}"]
+        assert len(limiter._suppressed) <= 3
+
+
+@needs_mp3_ffmpeg
 class TestBroadcasterIntegration:
     def test_stream_produces_mp3_audio(self, two_track_session):
         async def run():

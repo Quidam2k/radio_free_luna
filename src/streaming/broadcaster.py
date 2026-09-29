@@ -16,6 +16,7 @@ import asyncio
 import io
 import logging
 import os
+import re
 import sys
 import time
 from collections import deque
@@ -41,6 +42,49 @@ def _ensure_venv_scripts_on_path() -> None:
     scripts_dir = os.path.dirname(sys.executable)
     if scripts_dir and scripts_dir not in os.environ.get("PATH", ""):
         os.environ["PATH"] = scripts_dir + os.pathsep + os.environ.get("PATH", "")
+
+
+class _RepeatLimiter:
+    """Dedupe repeating log lines (ffmpeg can warn once per frame).
+
+    The first occurrence of a message is emitted; repeats (digits ignored, so
+    varying timestamps still match) are counted and summarized at most once
+    per `interval` seconds.
+    """
+
+    def __init__(self, interval: float = 30.0, max_keys: int = 200, clock=time.monotonic):
+        self.interval = interval
+        self.max_keys = max_keys
+        self._clock = clock
+        self._suppressed: Dict[str, List[Any]] = {}  # key -> [last text, count]
+        self._last_summary = clock()
+
+    def feed(self, text: str) -> List[str]:
+        key = re.sub(r"\d+", "#", text)
+        out: List[str] = []
+        entry = self._suppressed.get(key)
+        if entry is None:
+            if len(self._suppressed) >= self.max_keys:
+                out.extend(self.flush())
+                self._suppressed.clear()
+            self._suppressed[key] = [text, 0]
+            out.append(text)
+        else:
+            entry[0] = text
+            entry[1] += 1
+        if self._clock() - self._last_summary >= self.interval:
+            out.extend(self.flush())
+        return out
+
+    def flush(self) -> List[str]:
+        """Summaries for suppressed repeats since the last flush."""
+        self._last_summary = self._clock()
+        out = []
+        for entry in self._suppressed.values():
+            if entry[1]:
+                out.append(f"{entry[0]} (repeated {entry[1]}x)")
+                entry[1] = 0
+        return out
 
 
 @dataclass
@@ -103,6 +147,7 @@ class Broadcaster:
         self._pump_task: Optional[asyncio.Task] = None
         self._reader_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
+        self._stderr_limiter = _RepeatLimiter()
         self._ffmpeg: Optional[asyncio.subprocess.Process] = None
         self._session_active = False
         self._session_started_at: float = 0.0
@@ -342,6 +387,7 @@ class Broadcaster:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        self._stderr_limiter = _RepeatLimiter()
         self._stderr_task = asyncio.create_task(self._drain_stderr())
 
     async def _drain_stderr(self) -> None:
@@ -352,11 +398,17 @@ class Broadcaster:
                 line = await self._ffmpeg.stderr.readline()
                 if not line:
                     break
-                logger.debug(f"ffmpeg: {line.decode('utf-8', errors='replace').strip()}")
+                text = line.decode("utf-8", errors="replace").strip()
+                if text:
+                    for msg in self._stderr_limiter.feed(text):
+                        logger.warning(f"ffmpeg: {msg}")
         except asyncio.CancelledError:
             raise
         except Exception as e:
             logger.debug(f"ffmpeg stderr drain ended: {e}")
+        finally:
+            for msg in self._stderr_limiter.flush():
+                logger.warning(f"ffmpeg: {msg}")
 
     async def _reader_loop(self) -> None:
         if not self._ffmpeg or not self._ffmpeg.stdout:
