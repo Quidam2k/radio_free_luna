@@ -135,6 +135,22 @@ async def rfl_identify_track(path: str, research: bool = True) -> str:
 
 
 @mcp.tool()
+async def rfl_track_notes(artist: str, title: str, limit: int = 6) -> str:
+    """Sourced facts a DJ can say about one song: history, recording story, theme,
+    samples, covers, writers, first release, artist intro. Each line ends with its
+    source URL. Read-only and fail-open ('no notes' when unknown); the station
+    need not be running. Built by scripts/build_dj_notes.py (#6006).
+    """
+    from src.notes.store import format_facts, lookup
+
+    notes = lookup(artist, title, limit=limit)
+    if not notes["facts"]:
+        return f"No notes for {artist} - {title}."
+    head = f"{notes['artist']} - {notes['title']} (matched by {notes['matched_by']})"
+    return "\n".join([head] + [f"- {line}" for line in format_facts(notes, max_facts=limit)])
+
+
+@mcp.tool()
 async def rfl_enrich_apply(
     report_path: str,
     min_confidence: float = 0.85,

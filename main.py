@@ -368,6 +368,12 @@ class RadioFreeLuna:
                 "updated_at": context.get("updated_at").isoformat() if context.get("updated_at") else None
             }
         
+        # Sourced per-track DJ notes (#6006); fail-open, empty facts when unknown
+        @self.app.get("/api/track-notes")
+        async def get_track_notes(title: str, artist: str = "", limit: int = 6):
+            from src.notes.store import lookup
+            return lookup(artist, title, limit=limit)
+
         # Root endpoint - serve web interface
         @self.app.get("/")
         async def read_root():
@@ -400,6 +406,7 @@ class RadioFreeLuna:
                     "health": "/health",
                     "status": "/status",
                     "context": "/api/context",
+                    "track_notes": "/api/track-notes?artist=&title=",
                     "sessions": "/api/sessions",
                     "commentary": "/api/commentary",
                     "test_voice": "/api/test-voice",
