@@ -1,0 +1,122 @@
+[
+ {
+  "id": "S03E08@00048.2",
+  "move": "open",
+  "start": 0,
+  "end": 348
+ },
+ {
+  "id": "S04E10@00000.9",
+  "move": "open",
+  "start": 0,
+  "end": 629
+ },
+ {
+  "id": "S05E15@00047.6",
+  "move": "open",
+  "start": 0,
+  "end": 474
+ },
+ {
+  "id": "S03E11@00122.4",
+  "move": "open",
+  "start": 0,
+  "end": 318
+ },
+ {
+  "id": "S03E19@00135.1",
+  "move": "tangent",
+  "start": 0,
+  "end": 602
+ },
+ {
+  "id": "S04E07@01371.5",
+  "move": "tangent",
+  "start": 361,
+  "end": 741
+ },
+ {
+  "id": "S05E03@02567.0",
+  "move": "tangent",
+  "start": 340,
+  "end": 844
+ },
+ {
+  "id": "S04E10@02675.5",
+  "move": "tangent",
+  "start": 318,
+  "end": 944
+ },
+ {
+  "id": "S02E01@00628.0",
+  "move": "dedication",
+  "start": 0,
+  "end": 553
+ },
+ {
+  "id": "S02E01@00069.4",
+  "move": "dedication",
+  "start": 566,
+  "end": 979
+ },
+ {
+  "id": "S04E01@00217.6",
+  "move": "dedication",
+  "start": 231,
+  "end": 591
+ },
+ {
+  "id": "S04E22@01095.9",
+  "move": "dedication",
+  "start": 41,
+  "end": 633
+ },
+ {
+  "id": "S03E10@00002.7",
+  "move": "into_song",
+  "start": 296,
+  "end": 918
+ },
+ {
+  "id": "S05E16@00114.4",
+  "move": "into_song",
+  "start": 337,
+  "end": 843
+ },
+ {
+  "id": "S02E07@00126.8",
+  "move": "into_song",
+  "start": 515,
+  "end": 885
+ },
+ {
+  "id": "S02E02@00167.7",
+  "move": "into_song",
+  "start": 204,
+  "end": 733
+ },
+ {
+  "id": "S03E15@02664.7",
+  "move": "close",
+  "start": 62,
+  "end": 518
+ },
+ {
+  "id": "S01E08@00003.3",
+  "move": "close",
+  "start": 481,
+  "end": 715
+ },
+ {
+  "id": "S03E16@02449.2",
+  "move": "close",
+  "start": 450,
+  "end": 750
+ },
+ {
+  "id": "S03E11@02517.9",
+  "move": "close",
+  "start": 443,
+  "end": 842
+ }
+]

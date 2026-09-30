@@ -130,6 +130,8 @@ isort src/
 ```
 OPENAI_API_KEY=your_key_here          # For AI analysis and commentary (REQUIRED)
 OPENAI_MODEL=gpt-4o-mini              # OpenAI model for analysis and commentary
+DJ_LLM=openai                         # DJ commentary backend (#6019): openai | claude_cli
+DJ_LLM_MODEL=claude-sonnet-5-5        # model for DJ_LLM=claude_cli
 AUTO_ANALYZE_TRACKS=true              # Background worker analyzes unanalyzed tracks into track_analysis
 ARCHIVE_BROADCASTS=false              # Record each broadcast to archives/<session>.mp3
 MUSIC_DIRECTORIES=/path/to/music      # Comma-separated music folders
@@ -173,6 +175,12 @@ Weather and geocoding use the keyless Open-Meteo APIs — no key or account need
 - Voice personality adapts to **time of day** (morning, afternoon, evening, night)
 - Can use multiple voice models (alloy, echo, fable, nova, onyx, shimmer)
 - Falls back gracefully if TTS service unavailable
+- **Voice-clone guardrail (#6020/#6021, binding):** a clone of a real person's voice (the Chris clip) is for Todd's personal listening only, stays local, and never goes to a cloud TTS or any public/shared output. Enforced by `src/voice/voice_policy.py` (fails closed); rules in `notes/voice-clone-guardrail.md`.
+
+### DJ Voice / Style (#6019)
+- `src/dj/chris_style.py` injects the Compact digest of `docs/dj/chris_style_guide.md` plus 3-4 few-shots (`data/corpus/chris_fewshot.jsonl`, gitignored; rebuild with `scripts/build_chris_fewshot.py`) into every DJ system prompt. Both are optional (fail-open).
+- Facts about songs come only from the DJ-notes store (`_facts_block` → `src.notes.store.lookup`).
+- Text backend: `DJ_LLM=openai` (default) or `DJ_LLM=claude_cli` (`claude -p`, model `DJ_LLM_MODEL`, default claude-sonnet-5-5, windowless) in `src/dj/llm_backend.py`.
 
 ### Context Awareness System
 The system intelligently reacts to:

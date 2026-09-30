@@ -14,6 +14,8 @@ import openai
 
 from ..core.config import settings
 from ..core.database import get_db, Track, TrackAnalysis, TrackConnection
+from . import llm_backend
+from .chris_style import style_block
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +167,7 @@ class DJCommentaryGenerator:
         prompt = self._build_opening_prompt(theme, first_track, context_summary)
 
         try:
-            commentary_text = await self._call_openai_for_commentary(prompt, context)
+            commentary_text = await self._call_llm(prompt, context, kind="opening")
             
             return CommentarySegment(
                 content=commentary_text,
@@ -192,7 +194,7 @@ class DJCommentaryGenerator:
         prompt = self._build_transition_prompt(current_track, next_track, context, connection_info)
 
         try:
-            commentary_text = await self._call_openai_for_commentary(prompt, context)
+            commentary_text = await self._call_llm(prompt, context, kind="transition")
             
             return CommentarySegment(
                 content=commentary_text,
@@ -214,7 +216,7 @@ class DJCommentaryGenerator:
         prompt = self._build_feature_prompt(track, context, feature_type)
 
         try:
-            commentary_text = await self._call_openai_for_commentary(prompt, context)
+            commentary_text = await self._call_llm(prompt, context, kind="feature")
             
             return CommentarySegment(
                 content=commentary_text,
@@ -238,7 +240,7 @@ class DJCommentaryGenerator:
         prompt = self._build_contextual_prompt(context, trigger)
 
         try:
-            commentary_text = await self._call_openai_for_commentary(prompt, context)
+            commentary_text = await self._call_llm(prompt, context, kind="contextual")
             
             if self._is_worthy_commentary(commentary_text):
                 return CommentarySegment(
@@ -269,6 +271,8 @@ class DJCommentaryGenerator:
 
         Current context: {self._build_context_summary(context)}
 
+        {self._facts_block(track)}
+
         Create a short on-air acknowledgment that:
         1. Thanks {who} by name (if a name was given) and makes them feel heard
         2. Says what's about to play and why requests like this matter on radio
@@ -278,7 +282,7 @@ class DJCommentaryGenerator:
         """
 
         try:
-            commentary_text = await self._call_openai_for_commentary(prompt, context)
+            commentary_text = await self._call_llm(prompt, context, kind="request")
             return CommentarySegment(
                 content=commentary_text,
                 type="request",
@@ -322,6 +326,8 @@ class DJCommentaryGenerator:
         
         Context: {context_summary}
         First Track: {first_track.get('title', 'TBD') if first_track else 'TBD'} by {first_track.get('artist', 'TBD') if first_track else 'TBD'}
+
+        {self._facts_block(first_track)}
         
         Your opening should:
         1. Acknowledge the current moment and context naturally
@@ -397,8 +403,10 @@ class DJCommentaryGenerator:
             
             Track context: "{track.get('title', 'Unknown')}" 
             Current moment: {self._build_context_summary(context)}
+
+            {self._facts_block(track)}
             
-            Share fascinating insights about:
+            Share insights, drawn only from the facts above, about:
             1. The artist's musical journey or philosophy
             2. Cultural or historical significance
             3. Interesting connections to other artists or movements
@@ -425,8 +433,10 @@ class DJCommentaryGenerator:
             
             "musical_technique": f"""
             Explore the musical craftsmanship in "{track.get('title', 'Unknown')}" by {track.get('artist', 'Unknown')}.
+
+            {self._facts_block(track)}
             
-            Focus on:
+            Focus on (claims about how it was made come only from the facts above):
             1. Interesting musical techniques or innovations
             2. How the arrangement serves the song's message
             3. Notable instrumental or vocal elements
@@ -474,16 +484,30 @@ class DJCommentaryGenerator:
         time_of_day = getattr(temporal, "time_of_day", None) or "afternoon"
         return DAYPART_PERSONAS.get(time_of_day, DAYPART_PERSONAS["afternoon"])
 
-    async def _call_openai_for_commentary(self, prompt: str, context: Optional[Dict] = None) -> str:
-        """Call OpenAI API for commentary generation"""
-
+    def _system_prompt(self, context: Optional[Dict], kind: str = "transition") -> str:
+        """DJ system prompt: base voice + daypart directive + Chris style layer (#6019)."""
         system_content = (
             "You are an AI DJ with the thoughtful, erudite style of Chris in the Morning. "
             "You speak conversationally but with depth, making connections between music, "
-            "culture, and the human experience."
+            "culture, and the human experience. Reply with only the words to be spoken on air."
         )
         if context is not None:
             system_content += "\n\n" + self._persona(context)["directive"]
+        style = style_block(kind)
+        if style:
+            system_content += "\n\n" + style
+        return system_content
+
+    async def _call_llm(self, prompt: str, context: Optional[Dict] = None,
+                        kind: str = "transition") -> str:
+        """Generate commentary on the configured backend (DJ_LLM, #6019); raises on failure."""
+        system_content = self._system_prompt(context, kind)
+        if llm_backend.backend() == "claude_cli":
+            return await asyncio.to_thread(llm_backend.claude_cli_complete, system_content, prompt)
+        return await self._call_openai_for_commentary(prompt, system_content)
+
+    async def _call_openai_for_commentary(self, prompt: str, system_content: str) -> str:
+        """Call OpenAI API for commentary generation"""
 
         max_retries = 2
         for attempt in range(max_retries):

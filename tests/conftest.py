@@ -18,6 +18,12 @@ from main import RadioFreeLuna
 from src.core.database import Base
 
 
+@pytest.fixture(autouse=True)
+def _no_real_dj_llm(monkeypatch):
+    """.env may select DJ_LLM=claude_cli; tests must never spawn a real `claude -p` (#6019)."""
+    monkeypatch.setenv("DJ_LLM", "openai")
+
+
 @pytest.fixture
 def temp_db():
     """Create a temporary database for testing."""
