@@ -260,3 +260,41 @@ def test_mcp_tool_formats_sourced_lines(tmp_path, monkeypatch):
     out = asyncio.run(rfl_track_notes("Rush", "Animate"))
     assert "- A Rush song. (Wikipedia: https://w/a)" in out
     assert asyncio.run(rfl_track_notes("Nobody", "Nothing")).startswith("No notes")
+
+
+# --- RFL's own DJ uses the notes (#431: RFL-first) ------------------------------
+
+
+def test_commentary_uses_sourced_facts(tmp_path, monkeypatch):
+    from src.dj.commentary_generator import DJCommentaryGenerator
+
+    db = tmp_path / "notes.db"
+    with store.NotesStore(db) as s:
+        s.save("Rush", "Animate", "ok", [
+            {"kind": "summary", "text": "Animate is a 1993 Rush song.", "source_name": "Wikipedia",
+             "source_url": "https://w/a"}])
+    monkeypatch.setattr(store, "DEFAULT_DB", db)
+    gen = DJCommentaryGenerator(openai_api_key="test-key")
+    rush, other = {"artist": "Rush", "title": "Animate"}, {"artist": "X", "title": "Y"}
+    assert "Animate is a 1993 Rush song. (Wikipedia)" in gen._build_transition_prompt(other, rush, {}, {})
+    assert "say nothing specific" in gen._build_transition_prompt(rush, other, {}, {})
+    fb = gen._create_fallback_transition(other, rush, {})
+    assert fb.content == "Coming up, Animate by Rush. Animate is a 1993 Rush song."
+    assert gen._create_fallback_feature(rush, "song_story").content == "Animate is a 1993 Rush song."
+
+
+def test_batch_save_keeps_research_facts_and_still_enriches_stub(tmp_path):
+    db = tmp_path / "notes.db"
+    web = {"kind": "trivia", "text": "Recorded in a barn.", "source_name": "Songfacts",
+           "source_url": "https://example.org/b"}
+    auto = {"kind": "summary", "text": "A song by Rush.", "source_name": "Wikipedia",
+            "source_url": "https://w/a"}
+    with store.NotesStore(db) as s:
+        s.add_facts("Rush", "Animate", [web])
+        key = store.song_key("Rush", "Animate")
+        assert not s.has(key)  # research-only stub: the batch still owes it a pass
+        s.save("Rush", "Animate", "ok", [auto])
+        s.save("Rush", "Animate", "ok", [auto])  # a --redo replaces only batch facts
+        assert s.has(key)
+    texts = [f["text"] for f in store.lookup("Rush", "Animate", db_path=db)["facts"]]
+    assert texts == ["A song by Rush.", "Recorded in a barn."]

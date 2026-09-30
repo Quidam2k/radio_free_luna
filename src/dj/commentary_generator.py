@@ -341,6 +341,26 @@ class DJCommentaryGenerator:
         
         return base_prompt
     
+    def _sourced_facts(self, track: Optional[Dict], limit: int = 4) -> List[Dict]:
+        """Sourced DJ notes for a track (#6006); [] when none. Never raises."""
+        if not track or not track.get("title"):
+            return []
+        try:
+            from src.notes.store import lookup
+            return lookup(track.get("artist"), track.get("title"), limit=limit)["facts"]
+        except Exception:
+            return []
+
+    def _facts_block(self, track: Optional[Dict]) -> str:
+        """Prompt section that grounds claims about a song in stored, sourced facts (#6006)."""
+        facts = self._sourced_facts(track)
+        if not facts:
+            return ("No sourced facts are available for this song: say nothing specific "
+                    "about its history or meaning.")
+        lines = "".join(f"\n- {f['text']} ({f['source']})" for f in facts)
+        return ("SOURCED FACTS about the song (weave in one or two; state nothing about "
+                "the song beyond these):" + lines)
+
     def _build_transition_prompt(self, current_track: Dict, next_track: Dict, context: Dict, connection_info: Dict) -> str:
         """Build prompt for transition commentary"""
         
@@ -354,6 +374,8 @@ class DJCommentaryGenerator:
         
         Connection: {connection_desc}
         Current context: {self._build_context_summary(context)}
+
+        {self._facts_block(next_track)}
         
         Create a smooth transition that:
         1. Briefly reflects on what we just heard (optional)
@@ -389,6 +411,8 @@ class DJCommentaryGenerator:
             Tell the story behind "{track.get('title', 'Unknown')}" by {track.get('artist', 'Unknown')}.
             
             Current context: {self._build_context_summary(context)}
+
+            {self._facts_block(track)}
             
             Explore:
             1. The creation story or inspiration
@@ -634,6 +658,16 @@ class DJCommentaryGenerator:
         templates.append(
             f"From {current_track.get('artist', 'that')} to something equally compelling..."
         )
+        # With no model available, a sourced fact read straight from the notes
+        # store beats a generic line (#6006).
+        facts = self._sourced_facts(next_track, limit=3)
+        if facts:
+            fact = random.choice(facts)["text"]
+            return CommentarySegment(
+                content=f"Coming up, {next_track.get('title')} by {next_track.get('artist')}. {fact}",
+                type="transition",
+                duration_estimate=self._estimate_speech_duration(fact) + 3.0,
+            )
 
         return CommentarySegment(
             content=random.choice(templates),
@@ -644,6 +678,9 @@ class DJCommentaryGenerator:
     def _create_fallback_feature(self, track: Dict, feature_type: str) -> CommentarySegment:
         """Create fallback feature commentary when AI fails"""
         content = f"Let's take a moment to appreciate {track.get('artist', 'this artist')} and the craftsmanship in {track.get('title', 'this music')}."
+        facts = self._sourced_facts(track, limit=2)  # #6006: sourced notes beat a generic line
+        if facts:
+            content = " ".join(f["text"] for f in facts)
         
         return CommentarySegment(
             content=content,

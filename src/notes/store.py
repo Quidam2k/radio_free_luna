@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS facts (
     text        TEXT NOT NULL,
     source_name TEXT NOT NULL,       -- MusicBrainz | Wikipedia | <site> (web research)
     source_url  TEXT NOT NULL,
-    rank        INTEGER NOT NULL DEFAULT 0
+    rank        INTEGER NOT NULL DEFAULT 0,
+    origin      TEXT NOT NULL DEFAULT 'auto'  -- auto (batch-owned) | research (never overwritten)
 );
 CREATE INDEX IF NOT EXISTS facts_song ON facts(song_key);
 """
@@ -118,6 +119,9 @@ class NotesStore:
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
+        cols = [r[1] for r in self.conn.execute("PRAGMA table_info(facts)")]
+        if "origin" not in cols:  # stores created before the origin column
+            self.conn.execute("ALTER TABLE facts ADD COLUMN origin TEXT NOT NULL DEFAULT 'auto'")
 
     def close(self):
         self.conn.close()
@@ -130,20 +134,26 @@ class NotesStore:
 
     def has(self, key: str, retry_errors: bool = True) -> bool:
         row = self.conn.execute("SELECT status FROM songs WHERE key = ?", (key,)).fetchone()
-        if row is None:
+        if row is None or row[0] == "research":  # research-only stub: batch still owes it a pass
             return False
         return not (retry_errors and row[0] == "error")
 
     def save(self, artist: str, title: str, status: str, facts: Iterable[Dict] = (),
              detail: Optional[str] = None, **ids) -> str:
-        """Replace everything known about one song in a single transaction."""
+        """Replace the batch's facts for one song; research facts are kept."""
         key = song_key(artist, title)
         with self.conn:
-            self.conn.execute("DELETE FROM facts WHERE song_key = ?", (key,))
+            self.conn.execute("DELETE FROM facts WHERE song_key = ? AND origin = 'auto'", (key,))
             self.conn.execute(
-                "INSERT OR REPLACE INTO songs (key, artist, title, title_key, mb_recording,"
+                # Upsert, not INSERT OR REPLACE: a replace deletes the row and the
+                # ON DELETE CASCADE would silently take the research facts with it.
+                "INSERT INTO songs (key, artist, title, title_key, mb_recording,"
                 " mb_work, wikidata, wiki_url, status, detail, fetched_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(key) DO UPDATE SET artist=excluded.artist, title=excluded.title,"
+                " title_key=excluded.title_key, mb_recording=excluded.mb_recording,"
+                " mb_work=excluded.mb_work, wikidata=excluded.wikidata, wiki_url=excluded.wiki_url,"
+                " status=excluded.status, detail=excluded.detail, fetched_at=excluded.fetched_at",
                 (key, artist, clean_song_title(title, artist), norm_title(title, artist),
                  ids.get("mb_recording"), ids.get("mb_work"), ids.get("wikidata"),
                  ids.get("wiki_url"), status, detail, _now()),
@@ -163,7 +173,7 @@ class NotesStore:
         """Append facts (e.g. from a web-research pass) without dropping existing ones."""
         key = song_key(artist, title)
         if not self.conn.execute("SELECT 1 FROM songs WHERE key = ?", (key,)).fetchone():
-            self.save(artist, title, "ok")
+            self.save(artist, title, "research")
         n = 0
         with self.conn:
             for f in facts:
@@ -175,13 +185,12 @@ class NotesStore:
                 if dup:
                     continue
                 self.conn.execute(
-                    "INSERT INTO facts (song_key, kind, text, source_name, source_url, rank)"
-                    " VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO facts (song_key, kind, text, source_name, source_url, rank, origin)"
+                    " VALUES (?,?,?,?,?,?, 'research')",
                     (key, f.get("kind", "history"), f["text"], f["source_name"],
-                     f["source_url"], f.get("rank", 50)),
+                     f["source_url"], f.get("rank", 1)),
                 )
                 n += 1
-            self.conn.execute("UPDATE songs SET status = 'ok' WHERE key = ? AND ?", (key, n))
         return n
 
     def stats(self) -> Dict:
@@ -222,7 +231,7 @@ def lookup(artist: Optional[str], title: Optional[str], db_path=None,
         if row is None:
             rows = conn.execute(
                 "SELECT key, artist, title, mb_recording, wiki_url, status FROM songs"
-                " WHERE title_key = ? AND status = 'ok'",
+                " WHERE title_key = ? AND status IN ('ok', 'research')",
                 (norm_title(title, artist),),
             ).fetchall()
             if len(rows) == 1:
