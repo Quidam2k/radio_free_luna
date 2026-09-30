@@ -7,7 +7,7 @@ Consumes the SRT transcripts written by scripts/ingest_ne_subs.py and writes:
     data/corpus/ne_kbhr_segments.jsonl   one candidate on-air segment per line
       {id, episode, title, start, end, duration, text, confidence, why,
        italic_ratio, speaker, speaker_why, song_mentions, followed_by_cue,
-       source, method}
+       source, method, [review]}
     data/corpus/ne_songs.jsonl           one subtitle music cue per line
       {id, episode, episode_title, start, end, lyrics, captions, song_title,
        title_source, followed_monologue_id, followed_gap_sec}
@@ -15,6 +15,10 @@ Consumes the SRT transcripts written by scripts/ingest_ne_subs.py and writes:
 Attribution is heuristic (see src/corpus/chris.py); speaker is "chris" or
 "bernard" only on an on-air self-id. song_title is blank unless a caption
 quotes it. The old chris_in_the_morning.jsonl (#989, ASR) is not touched.
+
+If data/corpus/review/review_*.jsonl exist (the per-season sub-agent grading
+pass: {id, on_air, speaker_review, note}), each graded segment gains a
+"review" object. The heuristic fields are never overwritten.
 
 Usage:
     python scripts/build_ne_indexes.py [--min-confidence 0.35]
@@ -36,6 +40,17 @@ from src.corpus import transcripts as T
 IN_DIR = Path("data/corpus/northern_exposure")
 KBHR_OUT = Path("data/corpus/ne_kbhr_segments.jsonl")
 SONGS_OUT = Path("data/corpus/ne_songs.jsonl")
+REVIEW_DIR = Path("data/corpus/review")
+
+
+def load_reviews(review_dir: Path) -> dict[str, dict]:
+    reviews: dict[str, dict] = {}
+    for p in sorted(review_dir.glob("review_*.jsonl")):
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                r = json.loads(line)
+                reviews[r.pop("id")] = r
+    return reviews
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -51,7 +66,9 @@ def main() -> int:
     ap.add_argument("--kbhr-out", default=str(KBHR_OUT))
     ap.add_argument("--songs-out", default=str(SONGS_OUT))
     ap.add_argument("--min-confidence", type=float, default=0.35)
+    ap.add_argument("--review-dir", default=str(REVIEW_DIR))
     args = ap.parse_args()
+    reviews = load_reviews(Path(args.review_dir))
 
     paths = [
         p for p in sorted(Path(args.in_path).glob("*.transcript.json"))
@@ -69,6 +86,8 @@ def main() -> int:
         by_mono = {c["followed_monologue_id"]: c["id"] for c in cues if c["followed_monologue_id"]}
         for m in monos:
             m["followed_by_cue"] = by_mono.get(m["id"])
+            if m["id"] in reviews:
+                m["review"] = reviews[m["id"]]
         monos.sort(key=lambda m: m["start"])
         all_monos.extend(monos)
         all_cues.extend(cues)
@@ -83,13 +102,16 @@ def main() -> int:
         st["cue_eps"] += 1 if cues else 0
         st["titled"] += sum(1 for c in cues if c["song_title"])
         st["linked"] += sum(1 for c in cues if c["followed_monologue_id"])
+        st["on_air"] += sum(1 for m in monos if m.get("review", {}).get("on_air") in ("yes", "partial"))
 
     write_jsonl(Path(args.kbhr_out), all_monos)
     write_jsonl(Path(args.songs_out), all_cues)
     print(f"{len(paths)} transcripts -> {len(all_monos)} KBHR candidates ({args.kbhr_out}), "
           f"{len(all_cues)} music cues ({args.songs_out})")
     cols = ["episodes", "segments", "words", "chris_id", "bernard_id",
-            "cues", "cue_eps", "titled", "linked"]
+            "on_air", "cues", "cue_eps", "titled", "linked"]
+    graded = sum(1 for m in all_monos if "review" in m)
+    print(f"reviewed: {graded}/{len(all_monos)} (on_air = review yes|partial)")
     print("\n  season " + " ".join(f"{c:>10}" for c in cols))
     tot = defaultdict(int)
     for season in sorted(stats):
