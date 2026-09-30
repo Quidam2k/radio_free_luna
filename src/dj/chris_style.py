@@ -35,7 +35,9 @@ MOVES_FOR_KIND = {
 FACT_RULE = (
     "FACTS RULE: the examples above teach how Chris TALKS, never what is true. Every claim "
     "about a song, artist, year, recording or meaning must come from the SOURCED FACTS in the "
-    "request; if none are given, say nothing specific about the music. Musing, feelings, the "
+    "request; if none are given, say nothing specific about the music. That includes details "
+    "you are sure are true (a costume, a nickname, a chart run): unsourced means unsaid "
+    "(#6019 eval). Musing, feelings, the "
     "town, the weather and the listener are yours to riff on. Never mention Cicely, KBHR or "
     "the show's characters: this is Radio Free Luna."
 )
