@@ -46,6 +46,7 @@ _RADIO_MARKERS = [
     r"\bdial\b",
     r"\bkilowatts?\b",
     r"\bbroadcast\w*",
+    r"\b(?:morning|afternoon|evening|hey|hello),? cicely\b",
 ]
 
 # Writers / thinkers Chris is fond of quoting. Not exhaustive — a signal, not
@@ -85,6 +86,11 @@ class Block:
     text: str
     n_segments: int
     seg_word_counts: list[int] = field(default_factory=list)
+    italic_segments: int = 0
+
+    @property
+    def italic_ratio(self) -> float:
+        return self.italic_segments / max(1, self.n_segments)
 
     @property
     def duration(self) -> float:
@@ -95,12 +101,18 @@ class Block:
         return sum(self.seg_word_counts)
 
 
-def build_blocks(segments: list[dict], max_gap: float = 2.0) -> list[Block]:
+def build_blocks(
+    segments: list[dict], max_gap: float = 2.0, split_on_italic: bool = False
+) -> list[Block]:
     """Merge contiguous segments into blocks, splitting on silence > ``max_gap``.
 
     A "block" is our monologue *candidate*: a continuous run of speech. It is a
     proxy only — two people talking with short gaps also merge — which is why
     the scorer leans on radio/literary/position signals, not shape alone.
+
+    Music/lyric segments (SRT ``music`` flag) never join a block. With
+    ``split_on_italic`` a block also ends where the italic (off-screen voice)
+    flag flips, so a radio voice-over is not glued to the on-screen reply.
     """
     blocks: list[Block] = []
     cur: list[dict] = []
@@ -117,11 +129,19 @@ def build_blocks(segments: list[dict], max_gap: float = 2.0) -> list[Block]:
                 text=text,
                 n_segments=len(cur),
                 seg_word_counts=wc,
+                italic_segments=sum(1 for s in cur if s.get("italic")),
             )
         )
 
     for seg in segments:
-        if cur and (seg["start"] - cur[-1]["end"]) > max_gap:
+        if seg.get("music"):
+            flush()
+            cur = []
+            continue
+        if cur and (
+            (seg["start"] - cur[-1]["end"]) > max_gap
+            or (split_on_italic and bool(seg.get("italic")) != bool(cur[-1].get("italic")))
+        ):
             flush()
             cur = []
         cur.append(seg)
@@ -136,6 +156,23 @@ _W_POSITION = 0.30
 _W_RADIO = 0.30
 _W_LITERARY = 0.20
 _W_SHAPE = 0.20
+# Bonus (on top of the 1.0 above, then capped) for SRT italics = off-screen
+# voice. Italics also mark phone calls and voice-overs, so it is a nudge, not
+# a feature on par with radio framing.
+_W_OFFSCREEN = 0.15
+
+# Self-identification on air. Anything else is "uncertain" by design.
+_CHRIS_ID = re.compile(r"this is chris|chris in the morning|chris stevens|chris here\b", re.I)
+_BERNARD_ID = re.compile(r"this is bernard|bernard stevens|bernard here\b|bernard in the morning", re.I)
+
+# A DJ naming what he's about to play / just played. Surfaced verbatim, never
+# turned into a song title.
+_SONG_INTRO = re.compile(
+    r"\b(?:here's|here is|this one(?:'s| is| goes)|that was|coming up|"
+    r"spinning|playing|a little something)\b",
+    re.I,
+)
+_SENTENCE = re.compile(r"[^.!?]+[.!?]*")
 
 
 def _radio_hits(text: str) -> list[str]:
@@ -192,13 +229,36 @@ def score_block(block: Block, episode_end: float) -> tuple[float, list[str]]:
     if f_shape >= 0.3:
         why.append(f"monologue shape ({dur:.0f}s, {wc} words, {short_ratio:.0%} short turns)")
 
+    # off-screen voice (SRT italics only; ASR blocks have ratio 0)
+    f_off = block.italic_ratio
+    if f_off >= 0.5:
+        why.append(f"off-screen voice (italic {f_off:.0%})")
+
     confidence = (
         _W_POSITION * f_pos
         + _W_RADIO * f_radio
         + _W_LITERARY * f_lit
         + _W_SHAPE * f_shape
+        + _W_OFFSCREEN * f_off
     )
     return round(min(1.0, confidence), 3), why
+
+
+def attribute_speaker(text: str) -> tuple[str, str]:
+    """Return ``(speaker, why)``: "chris"/"bernard" only on on-air self-id."""
+    c, b = _CHRIS_ID.search(text), _BERNARD_ID.search(text)
+    if c and not b:
+        return "chris", f"self-id: {c.group(0)!r}"
+    if b and not c:
+        return "bernard", f"self-id: {b.group(0)!r}"
+    if b and c:
+        return "uncertain", "both Chris and Bernard self-ids present"
+    return "uncertain", "no on-air self-id; attribution by heuristic score only"
+
+
+def song_mentions(text: str) -> list[str]:
+    """Sentences where the DJ appears to introduce/back-announce a song."""
+    return [s.strip() for s in _SENTENCE.findall(text) if _SONG_INTRO.search(s)]
 
 
 # --- public API --------------------------------------------------------------
@@ -217,8 +277,12 @@ def extract_monologues(
     Returns a list of records (highest confidence first) shaped for
     ``chris_in_the_morning.jsonl``::
 
-        {"episode", "title", "start", "end", "duration", "text",
-         "confidence", "why", "source", "method"}
+        {"id", "episode", "title", "start", "end", "duration", "text",
+         "confidence", "why", "italic_ratio", "speaker", "speaker_why",
+         "song_mentions", "source", "method"}
+
+    ``speaker`` is "chris"/"bernard" only on an on-air self-id, otherwise
+    "uncertain". ``song_mentions`` are verbatim DJ intro sentences, not titles.
 
     A block must clear ``min_duration``/``min_words`` to be a candidate at all,
     then ``min_confidence`` to be emitted. Nothing is asserted as *truly* Chris
@@ -226,18 +290,29 @@ def extract_monologues(
     """
     segments = transcript.get("segments", [])
     episode_end = segments[-1]["end"] if segments else 0.0
-    blocks = build_blocks(segments, max_gap=max_gap)
+    has_italics = any(s.get("italic") for s in segments)
+    blocks = build_blocks(segments, max_gap=max_gap, split_on_italic=has_italics)
+    method = "heuristic:position+radio+literary+shape" + ("+offscreen" if has_italics else "")
+    episode = transcript.get("episode", "UNKNOWN")
 
     out: list[dict] = []
     for b in blocks:
-        if b.duration < min_duration or b.word_count < min_words:
+        # Off-screen radio heard in other scenes (SRT italics + KBHR framing)
+        # is typically a short bulletin; let it through with relaxed minima.
+        radio_voice = b.italic_ratio >= 0.5 and bool(_radio_hits(b.text))
+        if radio_voice:
+            if b.duration < 4.0 or b.word_count < 10:
+                continue
+        elif b.duration < min_duration or b.word_count < min_words:
             continue
         conf, why = score_block(b, episode_end)
-        if conf < min_confidence:
+        if conf < (min(min_confidence, 0.2) if radio_voice else min_confidence):
             continue
+        speaker, speaker_why = attribute_speaker(b.text)
         out.append(
             {
-                "episode": transcript.get("episode", "UNKNOWN"),
+                "id": f"{episode}@{b.start:07.1f}",
+                "episode": episode,
                 "title": transcript.get("title", ""),
                 "start": round(b.start, 2),
                 "end": round(b.end, 2),
@@ -245,8 +320,12 @@ def extract_monologues(
                 "text": b.text,
                 "confidence": conf,
                 "why": why,
+                "italic_ratio": round(b.italic_ratio, 2),
+                "speaker": speaker,
+                "speaker_why": speaker_why,
+                "song_mentions": song_mentions(b.text),
                 "source": transcript.get("source", ""),
-                "method": "heuristic:position+radio+literary+shape",
+                "method": method,
             }
         )
     out.sort(key=lambda r: r["confidence"], reverse=True)

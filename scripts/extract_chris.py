@@ -41,7 +41,13 @@ OUT_FILE = Path("data/corpus/chris_in_the_morning.jsonl")
 def load_inputs(in_path: Path) -> list[Path]:
     if in_path.is_file():
         return [in_path]
-    return [Path(p) for p in sorted(glob.glob(str(in_path / "*.transcript.json")))]
+    # *.asr.transcript.json are the preserved #989 ASR copies; skip so an
+    # episode is never mined twice.
+    return [
+        Path(p)
+        for p in sorted(glob.glob(str(in_path / "*.transcript.json")))
+        if not p.endswith(".asr.transcript.json")
+    ]
 
 
 def main() -> int:
