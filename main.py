@@ -615,9 +615,12 @@ class RadioFreeLuna:
                 settings.database_url
             )
             
-            # Perform initial scan (disk + DB heavy — keep it off the event loop)
-            logger.info("Performing initial library scan...")
-            await asyncio.to_thread(self.file_monitor.initial_scan)
+            # Initial scan in the background (disk + DB heavy, minutes on the full
+            # library): the station serves /health and plays from the existing DB
+            # meanwhile, so the supervisor sees it come up (#6914)
+            logger.info("Starting initial library scan in the background...")
+            self.background_tasks.append(
+                asyncio.create_task(asyncio.to_thread(self.file_monitor.initial_scan)))
 
             # Start monitoring
             self.file_monitor.start()
