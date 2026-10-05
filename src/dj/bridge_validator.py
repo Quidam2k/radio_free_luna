@@ -222,8 +222,14 @@ def _inside_any_span(start: int, end: int, spans: Iterable[tuple[int, int]]) -> 
 
 
 def _is_allowed_name(name: str, allowed_texts: Iterable[str]) -> bool:
-    needle = re.sub(r"\s+", " ", name).casefold()
-    return any(needle in text.casefold() for text in allowed_texts)
+    """Allowed if the name, minus a possessive, is sourced, or if every part of a joined
+    name ("Saliers of the Indigo Girls", "Post Malone and Swae Lee") is."""
+    texts = [text.casefold() for text in allowed_texts]
+    needle = re.sub(r"['’]s\b", "", re.sub(r"\s+", " ", name)).casefold()
+    if any(needle in text for text in texts):
+        return True
+    parts = [p for p in re.split(r"\s+(?:of the|of|and|the)\s+", needle) if p]
+    return len(parts) > 1 and all(any(p in text for text in texts) for p in parts)
 
 
 def _starts_sentence(text: str, position: int) -> bool:
@@ -292,7 +298,7 @@ def validate(
     paragraphs = [
         part for part in _PARAGRAPH_BREAK_RE.split(think_free_raw) if part.strip()
     ]
-    if len(paragraphs) > 2:
+    if len(paragraphs) > 4:  # spoken patter may run in short beats; a wall of text is not
         reasons.append("write one short spoken passage, not multiple paragraphs")
 
     for phrase in BANNED_PHRASES:

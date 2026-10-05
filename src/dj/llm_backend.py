@@ -86,9 +86,11 @@ def local_complete(system: str, prompt: str, model: str = None,
     DJ_LOCAL_UNLOAD idle seconds; after_call unloads it with `lms` as soon as we're done.
     """
     model = model or local_model()
+    _require_loaded(model)
     if "qwen3" in model.lower():
         system += "\n/no_think"
-    body = {"model": model, "temperature": 0.8, "max_tokens": 400,
+    # Reasoning models (Gemma 4, Qwen3) think before answering; 400 tokens left no answer
+    body = {"model": model, "temperature": 0.8, "max_tokens": 2000,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": prompt}],
             "response_format": _BRIDGE_SCHEMA}
@@ -113,6 +115,19 @@ def local_complete(system: str, prompt: str, model: str = None,
     if not text:
         raise ValueError("Empty completion from local model")
     return text
+
+
+def _require_loaded(model: str) -> None:
+    """Refuse unless `model` is ALREADY loaded (#6926). A request naming an unloaded model
+    makes LM Studio JIT-load it onto Solace's GPU, which is Todd's to grant, not ours."""
+    root = local_base_url().rsplit("/v1", 1)[0]
+    try:
+        with urllib.request.urlopen(f"{root}/api/v0/models", timeout=5) as resp:
+            models = json.loads(resp.read().decode("utf-8")).get("data", [])
+    except Exception as e:
+        raise RuntimeError(f"cannot confirm {model} is loaded ({e}); refusing a JIT load")
+    if not any(m.get("id") == model and m.get("state") == "loaded" for m in models):
+        raise RuntimeError(f"{model} is not loaded in LM Studio; refusing to JIT-load it")
 
 
 def unload_local(model: str = None) -> bool:

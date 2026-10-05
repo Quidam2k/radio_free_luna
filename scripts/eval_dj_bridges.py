@@ -95,7 +95,11 @@ async def run_backend(label, pairs, local_model, local_gpu):
         meta["model"] = model
         meta["vram_before_mib"] = vram_mib()
         t0 = time.perf_counter()
-        code, out = lms("load", model, "--gpu", local_gpu, "--ttl", "600", "-y")  # ttl: unloads even if we die
+        # Own identifier so requests hit THIS load (CPU-only when --gpu off), not a JIT copy;
+        # ttl unloads it even if we die
+        model = "rfl-dj-eval"
+        code, out = lms("load", local_model, "--identifier", model, "--gpu", local_gpu,
+                        "--ttl", "600", "-y")
         meta["load_s"] = round(time.perf_counter() - t0, 1)
         meta["load_ok"] = code == 0
         meta["vram_loaded_mib"] = vram_mib()
@@ -166,7 +170,11 @@ def report_md(summaries, results):
 async def main(args):
     pairs = pick_pairs(args.pairs)
     results, summaries = {}, []
-    for label in [b.strip() for b in args.backends.split(",") if b.strip()]:
+    labels = [b.strip() for b in args.backends.split(",") if b.strip()]
+    if "local" in labels and not args.todd_approved_lmstudio:
+        # #6926: loading a model into LM Studio on Solace needs Todd's yes, every time
+        raise SystemExit("local leg needs --todd-approved-lmstudio (Todd's explicit yes)")
+    for label in labels:
         meta, rows = await run_backend(label, pairs, args.local_model, args.local_gpu)
         results[label] = rows
         summaries.append(summarize(meta, rows))
@@ -197,7 +205,9 @@ async def style_ab(out: Path):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--backends", default="local,haiku,sonnet")
+    ap.add_argument("--backends", default="haiku,sonnet")
+    ap.add_argument("--todd-approved-lmstudio", action="store_true",
+                    help="Todd said yes to loading a model into LM Studio for this run (#6926)")
     ap.add_argument("--pairs", type=int, default=10)
     ap.add_argument("--local-model", default=llm_backend.local_model())
     ap.add_argument("--local-gpu", default="off", help="lms --gpu: off (CPU only), max, or 0-1")

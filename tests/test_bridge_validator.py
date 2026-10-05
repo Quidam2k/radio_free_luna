@@ -115,14 +115,25 @@ def test_length_limits(draft, reason_fragment):
     assert any(reason_fragment in reason for reason in verdict.reasons)
 
 
-def test_more_than_two_paragraphs_fails():
+def test_many_paragraphs_fails():
     draft = (
         "Rain gathers along the road tonight.\n\n"
         "The old pavement listens in the dark.\n\n"
+        "Somewhere a porch light hums.\n\n"
+        "The wheels keep their own counsel.\n\n"
         "Blue Horizon takes us the rest of the way."
     )
     verdict = validate(draft, FACTS, CURRENT, NEXT)
     assert any("not multiple paragraphs" in reason for reason in verdict.reasons)
+
+
+def test_possessive_and_joined_sourced_names_pass():
+    nxt = {"title": "Sunflower", "artist": "Post Malone, Swae Lee"}
+    cur = {"title": "Wildflowers", "artist": "Tom Petty"}
+    facts = [{"text": "Written by Emily Saliers of Indigo Girls."}]
+    draft = ("Tom Petty's garden is still blooming, folks, and Post Malone and Swae Lee "
+             "pick it up from here, with a nod to Saliers of the Indigo Girls.")
+    assert validate(draft, facts, cur, nxt).ok
 
 
 def test_title_readout_at_start_fails():
