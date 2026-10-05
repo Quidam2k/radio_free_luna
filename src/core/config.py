@@ -78,8 +78,8 @@ class Settings:
         # LOCATION & CONTEXT
         # =========================================================================
 
-        self.location = os.getenv('LOCATION', 'Denver, CO')
-        self.timezone = os.getenv('TIMEZONE', 'America/Denver')
+        self.location = os.getenv('LOCATION', 'Eugene, OR')
+        self.timezone = os.getenv('TIMEZONE', 'America/Los_Angeles')
 
         # =========================================================================
         # MUSIC LIBRARY
@@ -89,7 +89,7 @@ class Settings:
         self.music_directories = [
             path.strip() for path in music_dirs_str.split(",") if path.strip()
         ]
-        self.supported_formats = ['.mp3', '.flac', '.wav', '.m4a', '.ogg']
+        self.supported_formats = ['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.opus']
 
         # =========================================================================
         # TTS-WEBUI CONFIGURATION

@@ -137,8 +137,18 @@ def app(app_config, mock_openai, mock_tts_client, monkeypatch):
 
 @pytest.fixture
 def client(app):
-    """Create test client."""
-    return TestClient(app.app)
+    """Create test client. Requests come from loopback, like Todd's own machine
+    (listener_auth gates every other address)."""
+    return TestClient(as_client(app.app, "127.0.0.1"))
+
+
+def as_client(asgi_app, host):
+    """Wrap an ASGI app so every request appears to come from `host`."""
+    async def wrapped(scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            scope = dict(scope, client=(host, 50000))
+        await asgi_app(scope, receive, send)
+    return wrapped
 
 
 @pytest.fixture

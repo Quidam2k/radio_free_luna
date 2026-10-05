@@ -25,7 +25,7 @@ class TestSettings:
         settings = Settings()
 
         assert settings.openai_api_key == "test_key"
-        assert settings.location == "Denver, CO"
+        assert settings.location == "Eugene, OR"
         assert settings.tts_webui_url == "http://localhost:7860"
         assert settings.tts_voice_model == "alloy"
     

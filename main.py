@@ -31,6 +31,7 @@ import uvicorn
 from src.core.config import settings
 from src.core.database import init_database
 from src.core.file_monitor import FileMonitor
+from src.core.listener_auth import listener_auth_middleware
 from src.analysis.ai_analyzer import MusicAnalysisEngine
 from src.analysis.lyrics_fetcher import LyricsFetcher
 from src.dj.session_manager import SessionManager
@@ -71,7 +72,9 @@ class RadioFreeLuna:
             description="Intelligent music streaming with AI-powered contextual DJ commentary and voice synthesis",
             version="1.0.0"
         )
-        
+        # LAN-bound station: non-loopback listeners need an invited token (#6914/#6918)
+        self.app.middleware("http")(listener_auth_middleware)
+
         # Initialize TTS configuration
         self.tts_config = TTSConfig(
             api_url=settings.tts_webui_url,

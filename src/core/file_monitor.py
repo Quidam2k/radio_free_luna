@@ -18,6 +18,16 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def title_from_filename(file_path: str, artist: str = "Unknown") -> dict:
+    """Title (and artist, if tags lack one) from an untagged file's name: 'Artist - Title (152kbit_Opus)'."""
+    from src.enrich.identify import _split_artist_title, clean_title, unsanitize_filename
+    stem = clean_title(unsanitize_filename(Path(file_path).stem)) or Path(file_path).stem
+    split = _split_artist_title(stem)
+    if split and artist == "Unknown":
+        return {"artist": split[0], "title": split[1]}
+    return {"title": split[1] if split else stem}
+
 class MusicFileHandler(FileSystemEventHandler):
     """Handle file system events for music files"""
     
@@ -166,10 +176,14 @@ class MusicFileHandler(FileSystemEventHandler):
             
             # Extract metadata with fallbacks
             metadata = self.extract_metadata(audio_file)
+            if metadata['title'] == "Unknown":
+                metadata.update(title_from_filename(file_path, metadata['artist']))
             
             if existing_track:
-                # Update existing track
+                # Update existing track; an untagged file never blanks a good stored value
                 for key, value in metadata.items():
+                    if value in (None, "Unknown", 0) and getattr(existing_track, key, None):
+                        continue
                     setattr(existing_track, key, value)
                 existing_track.file_hash = file_hash
                 existing_track.file_size = os.path.getsize(file_path)
@@ -203,12 +217,17 @@ class MusicFileHandler(FileSystemEventHandler):
         
         def safe_get(key_variants, default="Unknown"):
             for key in key_variants:
-                if key in audio_file:
+                # Vorbis/Opus comments raise ValueError on non-ASCII keys like '©nam'
+                try:
+                    if key not in audio_file:
+                        continue
                     value = audio_file[key]
-                    if isinstance(value, list) and value:
-                        return str(value[0])
-                    elif value:
-                        return str(value)
+                except (ValueError, KeyError):
+                    continue
+                if isinstance(value, list) and value:
+                    return str(value[0])
+                elif value:
+                    return str(value)
             return default
         
         # Extract basic metadata
