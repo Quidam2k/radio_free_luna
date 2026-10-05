@@ -140,3 +140,10 @@ def test_retry_hint_is_one_actionable_paragraph():
     assert "\n" not in hint
     assert "rejected" in hint
     assert "only the sourced facts" in hint
+
+
+def test_common_word_title_used_as_a_word_is_not_a_readout():
+    nxt = {"title": "Gratitude", "artist": "Beastie Boys"}
+    draft = ("A little gratitude goes a long way on a cold morning, folks, and the "
+             "Beastie Boys bring Gratitude with the bass turned up.")
+    assert validate(draft, [], CURRENT, nxt).ok

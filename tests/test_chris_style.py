@@ -110,9 +110,16 @@ def test_request_and_opening_prompts_carry_facts_block():
     assert "FACTS-MARKER" in gen._build_feature_prompt({"title": "T", "artist": "A"}, {}, "artist_spotlight")
 
 
-# --- clone-voice gate (#6020 / #6021) ---
+# --- clone-voice gate (#6020 / #6021), three audience tiers (#6915 / #6918) ---
 
 LOCAL_TTS = "http://localhost:7860"
+SHARED, LOCAL, PUBLIC = "private-shared", "private-local", "public"
+
+
+@pytest.fixture(autouse=True)
+def _no_archive_no_private_hosts(monkeypatch):
+    monkeypatch.delenv("ARCHIVE_BROADCASTS", raising=False)
+    monkeypatch.delenv("PRIVATE_TTS_HOSTS", raising=False)
 
 
 def test_clone_detection(monkeypatch):
@@ -123,32 +130,58 @@ def test_clone_detection(monkeypatch):
     assert not is_clone_voice("fable") and not is_clone_voice(None)
 
 
-@pytest.mark.parametrize("output", ["stream", "archive", "mixdown", "podcast", "", "unknown"])
-def test_clone_refused_on_public_or_unknown_outputs(output):
-    ok, _ = clone_allowed(output, host="127.0.0.1", tts_url=LOCAL_TTS)
-    assert not ok
-    assert resolve_voice("clone:chris", output, host="127.0.0.1", tts_url=LOCAL_TTS) == "fable"
+@pytest.mark.parametrize("output", ["stream", "archive", "mixdown", "podcast", "test_voice",
+                                    "private_speak", "", "unknown"])
+def test_clone_refused_without_a_proven_private_audience(output):
+    """No audience given = nobody authenticated = public, on every output but local ones."""
+    assert not clone_allowed(output, tts_url=LOCAL_TTS)[0]
+    assert resolve_voice("clone:chris", output, tts_url=LOCAL_TTS) == "fable"
 
 
-def test_clone_refused_when_station_not_loopback():
-    assert not clone_allowed("local_playback", host="0.0.0.0", tts_url=LOCAL_TTS)[0]
-    assert resolve_voice("clone:chris", "local_playback", host="0.0.0.0", tts_url=LOCAL_TTS) == "fable"
+@pytest.mark.parametrize("output", ["archive", "mixdown", "podcast", "test_voice", "unknown"])
+def test_files_and_unknown_outputs_are_public_even_for_private_listeners(output):
+    assert not clone_allowed(output, tts_url=LOCAL_TTS, audience=[LOCAL, SHARED])[0]
+
+
+def test_private_local_tier_allowed():
+    assert clone_allowed("local_playback", tts_url=LOCAL_TTS)[0]
+    assert clone_allowed("private_speak", tts_url=LOCAL_TTS, audience=[LOCAL])[0]
+    assert resolve_voice("clone:chris", "private_bridge",
+                         tts_url="http://127.0.0.1:7860") == "clone:chris"
+
+
+def test_private_shared_tier_allowed_for_invited_listeners():
+    """Todd's ruling (#6915): invited friends, even remote, are private, not public."""
+    assert clone_allowed("private_speak", tts_url=LOCAL_TTS, audience=[SHARED])[0]
+    assert clone_allowed("stream", tts_url=LOCAL_TTS, audience=[LOCAL, SHARED, SHARED])[0]
+
+
+def test_stream_goes_public_when_any_listener_is_public_or_unknown():
+    assert not clone_allowed("stream", tts_url=LOCAL_TTS, audience=[LOCAL, PUBLIC])[0]
+    assert not clone_allowed("stream", tts_url=LOCAL_TTS, audience=[SHARED, "weird"])[0]
+    assert not clone_allowed("stream", tts_url=LOCAL_TTS, audience=[])[0]
+
+
+def test_archived_stream_is_public(monkeypatch):
+    monkeypatch.setenv("ARCHIVE_BROADCASTS", "true")
+    assert not clone_allowed("stream", tts_url=LOCAL_TTS, audience=[LOCAL])[0]
 
 
 def test_clone_refused_on_cloud_or_unparseable_tts():
     for url in ["https://api.example-tts.com", "", "not a url"]:
-        assert not clone_allowed("private_bridge", host="127.0.0.1", tts_url=url)[0]
+        assert not clone_allowed("private_bridge", tts_url=url)[0]
+        assert not clone_allowed("private_speak", tts_url=url, audience=[SHARED])[0]
 
 
-def test_clone_allowed_only_private_loopback_local_tts():
-    assert clone_allowed("local_playback", host="127.0.0.1", tts_url=LOCAL_TTS)[0]
-    assert resolve_voice("clone:chris", "private_bridge", host="localhost",
-                         tts_url="http://127.0.0.1:7860") == "clone:chris"
+def test_private_tts_hosts_allows_todds_own_boxes(monkeypatch):
+    athena = "http://athena.lan:7779"
+    assert not clone_allowed("local_playback", tts_url=athena)[0]
+    monkeypatch.setenv("PRIVATE_TTS_HOSTS", "athena.lan")
+    assert clone_allowed("local_playback", tts_url=athena)[0]
 
 
-def test_default_env_is_public(monkeypatch):
-    monkeypatch.delenv("HOST", raising=False)  # default HOST is 0.0.0.0 -> refused
-    monkeypatch.setenv("TTS_WEBUI_URL", LOCAL_TTS)
+def test_default_env_with_cloud_tts_is_refused(monkeypatch):
+    monkeypatch.setenv("TTS_WEBUI_URL", "https://cloud.example.com")
     assert not clone_allowed("local_playback")[0]
 
 
@@ -158,4 +191,13 @@ def test_non_clone_voice_passes_through():
 
 def test_fallback_is_never_a_clone():
     assert resolve_voice("clone:a", "stream", fallback="clone:b",
-                         host="127.0.0.1", tts_url=LOCAL_TTS) == voice_policy.DEFAULT_FALLBACK_VOICE
+                         tts_url=LOCAL_TTS) == voice_policy.DEFAULT_FALLBACK_VOICE
+
+
+def test_registered_clone_maps_to_its_local_clip(tmp_path, monkeypatch):
+    reg = tmp_path / "voices.json"
+    reg.write_text('{"clone:feyn": "C:/x/feyn.wav"}', encoding="utf-8")
+    monkeypatch.setattr(voice_policy, "REGISTRY", reg)
+    assert voice_policy.is_clone_voice("clone:feyn")
+    assert voice_policy.tts_voice_name("clone:feyn") == "C:/x/feyn.wav"
+    assert voice_policy.tts_voice_name("fable") == "fable"

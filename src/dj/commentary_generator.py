@@ -15,6 +15,7 @@ import openai
 from ..core.config import settings
 from ..core.database import get_db, Track, TrackAnalysis, TrackConnection
 from . import llm_backend
+from .bridge_validator import retry_hint, validate as validate_bridge
 from .chris_style import style_block
 
 logger = logging.getLogger(__name__)
@@ -194,8 +195,10 @@ class DJCommentaryGenerator:
         prompt = self._build_transition_prompt(current_track, next_track, context, connection_info)
 
         try:
-            commentary_text = await self._call_llm(prompt, context, kind="transition")
-            
+            commentary_text = await self._validated_bridge(prompt, context, current_track, next_track)
+            if commentary_text is None:
+                return self._create_fallback_transition(current_track, next_track, context)
+
             return CommentarySegment(
                 content=commentary_text,
                 type="transition",
@@ -388,10 +391,12 @@ class DJCommentaryGenerator:
         2. Creates a meaningful bridge to the next song
         3. Adds interesting context about the upcoming track/artist
         4. Feels natural and conversational
-        5. Is 30-60 seconds when spoken
+        5. Is 20-40 seconds when spoken (one passage, under 90 words)
         6. Includes a gentle observation or insight
-        
-        Don't repeat song titles unless particularly relevant. Focus on the connection and context.
+
+        Name the next song at most once, in passing. No years, numbers or names that are not
+        in the sourced facts or the context above. Only the spoken words: no labels, no stage
+        directions. Focus on the connection and context.
         """
     
     def _build_feature_prompt(self, track: Dict, context: Dict, feature_type: str) -> str:
@@ -500,11 +505,40 @@ class DJCommentaryGenerator:
 
     async def _call_llm(self, prompt: str, context: Optional[Dict] = None,
                         kind: str = "transition") -> str:
-        """Generate commentary on the configured backend (DJ_LLM, #6019); raises on failure."""
+        """Generate commentary on the configured backend (DJ_LLM, #6019); raises on failure.
+
+        self.llm_override = (backend, model) pins a backend for this generator (the eval)."""
         system_content = self._system_prompt(context, kind)
-        if llm_backend.backend() == "claude_cli":
-            return await asyncio.to_thread(llm_backend.claude_cli_complete, system_content, prompt)
+        name, model = getattr(self, "llm_override", None) or (llm_backend.backend(), None)
+        if name in ("claude_cli", "local"):
+            return await asyncio.to_thread(llm_backend.complete, system_content, prompt, name, model)
         return await self._call_openai_for_commentary(prompt, system_content)
+
+    async def _validated_bridge(self, prompt: str, context: Optional[Dict],
+                                current_track: Dict, next_track: Dict) -> Optional[str]:
+        """A transition that passed bridge_validator, or None for the template fallback (#6914).
+
+        One retry, carrying the validator's reasons back to the model. Model errors raise
+        as before. self.last_bridge records what happened (backend, attempts, reasons).
+        """
+        facts = self._sourced_facts(next_track)
+        context_words = [self._build_context_summary(context or {}), "Radio Free Luna",
+                         settings.location]
+        name = (getattr(self, "llm_override", None) or (llm_backend.backend(),))[0]
+        self.last_bridge = {"backend": name, "attempts": 0, "reasons": [], "ok": False}
+        attempt_prompt = prompt
+        for attempt in range(2):
+            self.last_bridge["attempts"] = attempt + 1
+            raw = await self._call_llm(attempt_prompt, context, kind="transition")
+            verdict = validate_bridge(raw, facts, current_track, next_track, context_words)
+            if verdict.ok:
+                self.last_bridge.update(ok=True, text=verdict.text)
+                logger.info(f"Bridge ok on {name} (attempt {attempt + 1})")
+                return verdict.text
+            self.last_bridge["reasons"].append(verdict.reasons)
+            logger.warning(f"Bridge rejected on {name} (attempt {attempt + 1}): {verdict.reasons}")
+            attempt_prompt = prompt + "\n\n" + retry_hint(verdict)
+        return None
 
     async def _call_openai_for_commentary(self, prompt: str, system_content: str) -> str:
         """Call OpenAI API for commentary generation"""

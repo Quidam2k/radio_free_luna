@@ -300,7 +300,8 @@ def validate(
             reasons.append(f"remove the banned phrase '{phrase}'")
 
     if next_title:
-        title_count = len(_literal_pattern(next_title).findall(cleaned))
+        # Case-sensitive: a one-word title ("Gratitude") is also an ordinary word
+        title_count = len(re.compile(_literal_pattern(next_title).pattern).findall(cleaned))
         read_out = False
         if next_artist:
             read_out = bool(

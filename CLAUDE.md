@@ -175,7 +175,7 @@ Weather and geocoding use the keyless Open-Meteo APIs — no key or account need
 - Voice personality adapts to **time of day** (morning, afternoon, evening, night)
 - Can use multiple voice models (alloy, echo, fable, nova, onyx, shimmer)
 - Falls back gracefully if TTS service unavailable
-- **Voice-clone guardrail (#6020/#6021, binding):** a clone of a real person's voice (the Chris clip) is for Todd's personal listening only, stays local, and never goes to a cloud TTS or any public/shared output. Enforced by `src/voice/voice_policy.py` (fails closed); rules in `notes/voice-clone-guardrail.md`.
+- **Voice-clone guardrail (#6020/#6021, tiers #6918, binding):** a clone of a real person's voice (Chris, Feynman) is for Todd and listeners he invites (private-local, private-shared via listener token), never the public (unauthenticated listeners, archives, mixdowns, anything posted), and never goes to a cloud TTS. Enforced by `src/voice/voice_policy.py` (fails closed) + `src/core/listener_auth.py`; rules in `notes/voice-clone-guardrail.md`.
 
 ### DJ Voice / Style (#6019)
 - `src/dj/chris_style.py` injects the Compact digest of `docs/dj/chris_style_guide.md` plus 3-4 few-shots (`data/corpus/chris_fewshot.jsonl`, gitignored; rebuild with `scripts/build_chris_fewshot.py`) into every DJ system prompt. Both are optional (fail-open).

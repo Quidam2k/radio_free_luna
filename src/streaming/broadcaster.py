@@ -135,6 +135,7 @@ class Broadcaster:
         self.crossfader = BasicCrossfader(fade_duration_ms=6000)
 
         self._listeners: List[asyncio.Queue] = []
+        self._listener_tiers: Dict[int, str] = {}  # id(queue) -> audience tier (#6918)
         self._listener_lock = asyncio.Lock()
         self._listener_queue_max = 32  # bounded — slow listeners get drops, not backpressure
 
@@ -351,10 +352,13 @@ class Broadcaster:
 
     # ---- listener registration ----
 
-    async def register_listener(self) -> asyncio.Queue:
+    async def register_listener(self, tier: str = "public") -> asyncio.Queue:
+        """`tier` is the listener's audience tier from listener_auth; it decides whether
+        the stream may carry a clone voice (voice_policy, #6918)."""
         q: asyncio.Queue = asyncio.Queue(maxsize=self._listener_queue_max)
         async with self._listener_lock:
             self._listeners.append(q)
+            self._listener_tiers[id(q)] = tier
         logger.info(f"Listener connected (total={len(self._listeners)})")
         return q
 
@@ -362,6 +366,7 @@ class Broadcaster:
         async with self._listener_lock:
             if q in self._listeners:
                 self._listeners.remove(q)
+            self._listener_tiers.pop(id(q), None)
         logger.info(f"Listener disconnected (total={len(self._listeners)})")
 
     # ---- ffmpeg ----
@@ -502,7 +507,9 @@ class Broadcaster:
                 return body
 
             voice_settings = getattr(segment, "voice_settings", None)
-            audio_bytes = await self.tts_client.synthesize_speech(text, voice_settings)
+            audio_bytes = await self.tts_client.synthesize_speech(
+                text, voice_settings, output="stream",
+                audience=list(self._listener_tiers.values()))
             if not audio_bytes:
                 return body
 

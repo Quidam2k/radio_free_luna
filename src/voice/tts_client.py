@@ -10,7 +10,7 @@ from typing import Dict, Optional, AsyncGenerator
 import logging
 
 from .tts_config import TTSConfig
-from .voice_policy import resolve_voice
+from .voice_policy import resolve_voice, tts_voice_name
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +45,14 @@ class TTSWebUIClient:
             self.session = None
     
     async def synthesize_speech(self, text: str, voice_settings: Optional[Dict] = None,
-                                output: str = "stream") -> Optional[bytes]:
+                                output: str = "stream",
+                                audience: Optional[list] = None) -> Optional[bytes]:
         """Convert text to speech using TTS-WebUI's OpenAI-compatible API with enhanced error handling.
 
-        `output` names where the audio goes. It defaults to the public stream, so a clone
-        voice is refused unless a caller names a private output (voice_policy, #6019/#6020/#6021;
-        rules in notes/voice-clone-guardrail.md).
+        `output` names where the audio goes and `audience` the listener tiers who will hear
+        it. Defaults are the public stream with no known audience, so a clone voice is refused
+        unless a caller proves a private audience (voice_policy, #6020/#6021/#6918; rules in
+        notes/voice-clone-guardrail.md).
         """
         
         # Input validation
@@ -84,9 +86,9 @@ class TTSWebUIClient:
             payload = {
                 "model": self.config.quality,  # "tts-1" or "tts-1-hd"
                 "input": text.strip(),
-                "voice": resolve_voice(
+                "voice": tts_voice_name(resolve_voice(
                     voice_settings.get("voice", self.config.voice_model) if voice_settings else self.config.voice_model,
-                    output, tts_url=self.config.api_url),
+                    output, tts_url=self.config.api_url, audience=audience)),
                 "speed": max(0.25, min(4.0, voice_settings.get("speed", self.config.speed) if voice_settings else self.config.speed)),  # Clamp speed
                 "response_format": self.config.response_format
             }

@@ -9,20 +9,33 @@ the running RFL server.
 RFL_URL   base URL of the RFL server (default http://localhost:8080)
 ```
 
-RFL has no auth — do not add a Bearer token here; it would be dead weight.
-Note that RFL binds `0.0.0.0`, so this is an open control surface over the LAN;
-put it behind your own network controls if that matters for your deployment.
+Loopback needs no token; LAN clients need a listener token (src/core/listener_auth.py).
+RFL binds `0.0.0.0`, but every non-loopback request needs an invited token;
+see scripts/listener_token.py.
 
 RFL is not an always-on service. Every tool degrades to a clear message
 ("RFL server is not running...") instead of raising when the server is down.
 
 ## Run
 
+Both servers run from their OWN venv, `.venv-mcp` (#6914). Never install `mcp` into the
+station's `.venv`: it upgrades starlette/anyio/pydantic past FastAPI 0.104 and breaks
+the station.
+
 ```
 cd <path-to>/radio_free_luna
-pip install -r rfl_mcp/requirements.txt
-python -m rfl_mcp.server
+py -3.11 -m venv .venv-mcp
+.venv-mcp\Scripts\python.exe -m pip install "mcp>=1.2.0,<2" "httpx>=0.27.0" mutagen aiohttp python-dotenv
+.venv-mcp\Scripts\python.exe -m rfl_mcp.server    # rfl-dj: control surface over HTTP
+.venv-mcp\Scripts\python.exe -m rfl_mcp.toolkit   # rfl-toolkit: notes/enrich, station-down OK
 ```
+
+The rfl-toolkit server (`rfl_mcp/toolkit.py`) carries `rfl_track_notes` (sourced song
+facts from `data/dj_notes.db`), `rfl_identify_track`, `rfl_enrich_scan`, `rfl_enrich_apply`.
+It reads the DB directly, so it works with the station down.
+
+Since the station binds the LAN with listener tokens (#6914), `RFL_URL` should stay on
+`http://localhost:8080`: loopback needs no token.
 
 Or use `launch.bat` to start the RFL server itself first (the MCP server is
 a thin client over HTTP — it doesn't start RFL for you).

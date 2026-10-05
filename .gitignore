@@ -27,6 +27,7 @@ wheels/
 
 # Virtual environments
 .venv/
+.venv-mcp/
 .venv_temp/
 venv/
 ENV/

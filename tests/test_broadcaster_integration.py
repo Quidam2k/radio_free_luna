@@ -255,7 +255,7 @@ class TestBroadcasterIntegration:
         class FakeTTS:
             calls: List[str] = []
 
-            async def synthesize_speech(self, text, voice_settings=None):
+            async def synthesize_speech(self, text, voice_settings=None, output="stream", audience=None):
                 FakeTTS.calls.append(text)
                 return voice_bytes
 

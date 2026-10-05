@@ -191,6 +191,27 @@ class RadioFreeLuna:
                 logger.error(f"Voice synthesis error: {e}")
                 return {"status": "error", "message": str(e)}
         
+        @self.app.post("/api/private/speak")
+        async def private_speak(request: Request,
+                                text: str = Body(..., max_length=1000),
+                                voice: Optional[str] = Body(None)):
+            """Speak a line, in a clone voice if you may hear one (#6918).
+
+            The audio comes back only to this caller, so the audience is this request's
+            tier: loopback = private-local, an invited token = private-shared. The clone is
+            granted per request by voice_policy; anyone else gets the fallback voice.
+            """
+            if not self.tts_client:
+                raise HTTPException(status_code=503, detail="TTS system not available")
+            tier = (getattr(request.state, "listener", None) or {}).get("tier", "public")
+            settings_ = {"voice": voice} if voice else None
+            audio = await self.tts_client.synthesize_speech(
+                text, settings_, output="private_speak", audience=[tier])
+            if not audio:
+                raise HTTPException(status_code=502, detail="TTS returned no audio")
+            return Response(content=audio, media_type="audio/mpeg",
+                            headers={"Cache-Control": "no-store"})
+
         # Create a themed session
         @self.app.post("/api/sessions")
         async def create_session(
@@ -435,7 +456,8 @@ class RadioFreeLuna:
             if not self.broadcaster or not self.broadcaster.is_active:
                 raise HTTPException(status_code=503, detail="No active session — POST /api/streaming/start first")
 
-            queue = await self.broadcaster.register_listener()
+            listener = getattr(request.state, "listener", None) or {}
+            queue = await self.broadcaster.register_listener(tier=listener.get("tier", "public"))
             wants_icy = request.headers.get("icy-metadata", "").strip() == "1"
             icy_metaint = 16384  # audio bytes between metadata blocks
 
