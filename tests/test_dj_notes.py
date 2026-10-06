@@ -298,3 +298,102 @@ def test_batch_save_keeps_research_facts_and_still_enriches_stub(tmp_path):
         assert s.has(key)
     texts = [f["text"] for f in store.lookup("Rush", "Animate", db_path=db)["facts"]]
     assert texts == ["A song by Rush.", "Recorded in a barn."]
+
+
+# --- wrong-version guard (#3522) -------------------------------------------------
+
+
+def _f(kind, text, source="Wikipedia"):
+    return {"kind": kind, "text": text, "source": source, "url": "https://x"}
+
+
+COSTELLO = [
+    _f("summary", "\"(What's So Funny 'Bout) Peace, Love, and Understanding\" is a 1974 song "
+                  "written by English singer/songwriter Nick Lowe."),
+    _f("history", "Initially released by Lowe with his band Brinsley Schwarz on their 1974 album."),
+    _f("history", "And that was amazing—I'm amazed nowadays, looking back, that I did that.\""),
+    _f("history", "It reached number 3 on the UK charts."),
+    _f("recording", "Costello and the Attractions recorded it during the sessions for Armed Forces."),
+    _f("release", 'First released in 1979, on the album "Armed Forces".', "MusicBrainz"),
+    _f("writers", "Written by Nick Lowe.", "MusicBrainz"),
+    _f("cover_of", "Elvis Costello's recording is a cover; the song was written by Nick Lowe.",
+       "MusicBrainz"),
+]
+
+
+def test_version_guard_drops_unlabelled_facts_about_the_original():
+    kept, info = store.version_guard(COSTELLO, "Elvis Costello")
+    assert info["is_cover"] and info["dropped"] == 2
+    texts = [f["text"] for f in kept]
+    assert not any("amazed" in t or "UK charts" in t for t in texts)
+    assert any(t.startswith("Initially released by Lowe") for t in texts)  # labelled -> kept
+    assert len(kept) == 6
+
+
+def test_version_guard_detects_cover_from_wikipedia_wording():
+    facts = [
+        _f("summary", '"Hurt" is a song by American industrial rock band Nine Inch Nails.'),
+        _f("history", "The song was originally recorded by Nine Inch Nails in 1994."),
+        _f("reception", "It peaked at number 1 on the charts."),
+        _f("recording", "Cash recorded it in 2002 with producer Rick Rubin."),
+    ]
+    assert store.original_performers(facts, "Johnny Cash") == ["Nine Inch Nails"]
+    kept, info = store.version_guard(facts, "Johnny Cash")
+    assert info["dropped"] == 1 and "peaked" not in " ".join(f["text"] for f in kept)
+
+
+def test_version_guard_leaves_originals_and_generic_tags_alone():
+    rush = [_f("summary", '"The Big Wheel" is a song by Canadian rock band Rush.'),
+            _f("history", "It was first performed by the band live in 1991."),
+            _f("reception", "It charted at No. 5.")]
+    assert store.version_guard(rush, "Rush") == (rush, {"is_cover": False, "dropped": 0, "original": []})
+    kept, info = store.version_guard(COSTELLO, "Various Artists")
+    assert kept == COSTELLO and info["dropped"] == 0
+
+
+def test_mentions_artist_whole_words_and_surnames():
+    assert store.mentions_artist("Rush rushed the tempo", "Rush")
+    assert not store.mentions_artist("they rushed it", "Rush")
+    assert store.mentions_artist("Costello sang", "Elvis Costello & the Attractions")
+    assert store.mentions_artist("The Police toured", "Police")
+
+
+def test_lookup_applies_guard_and_refuses_cross_artist_title_only(tmp_path):
+    db = tmp_path / "notes.db"
+    with store.NotesStore(db) as s:
+        s.save("Elvis Costello", "Peace, Love and Understanding", "ok",
+               [{"kind": f["kind"], "text": f["text"], "source_name": f["source"],
+                 "source_url": f["url"]} for f in COSTELLO])
+    notes = store.lookup("Elvis Costello", "Peace, Love and Understanding", db_path=db, limit=20)
+    assert notes["version_guard"]["dropped"] == 2 and len(notes["facts"]) == 6
+    # Nick Lowe's own recording must not borrow the Costello entry's facts
+    assert store.lookup("Nick Lowe", "Peace, Love and Understanding", db_path=db)["found"] is False
+    assert store.lookup("", "Peace, Love and Understanding", db_path=db)["found"] is True
+
+
+def test_title_strip_drops_video_suffix():
+    assert store.clean_song_title("Little Blue | @MahoganySessions") == "Little Blue"
+
+
+# --- first release: reissues and bonus tracks ------------------------------------
+
+
+def test_original_album_prefers_older_album_that_really_had_the_song(monkeypatch):
+    recs = [{"releases": [
+        {"title": "Armed Forces", "date": "1987-07-13",
+         "release-group": {"id": "rg-af", "primary-type": "Album", "secondary-types": []}},
+        {"title": "My Aim Is True", "date": "2026-10-02",
+         "release-group": {"id": "rg-maint", "primary-type": "Album", "secondary-types": []}}]}]
+    groups = {
+        "rg-af": {"title": "Armed Forces", "first-release-date": "1979-01-05",
+                  "releases": [{"id": "uk", "date": "1979-01-05"}, {"id": "us", "date": "1979-01-19"}]},
+        "rg-maint": {"title": "My Aim Is True", "first-release-date": "1977-07-22",
+                     "releases": [{"id": "maint", "date": "1977-07-22"}]},
+    }
+    tracks = {"uk": ["Accidents Will Happen"], "us": ["(What's So Funny 'Bout) Peace, Love and Understanding"],
+              "maint": ["Alison"]}
+    monkeypatch.setattr(enrich.sources, "mb_release_group", lambda c, i: groups[i])
+    monkeypatch.setattr(enrich.sources, "mb_release", lambda c, i: {
+        "media": [{"tracks": [{"title": t} for t in tracks[i]]}]})
+    got = enrich.original_album(None, recs, "Peace, Love and Understanding", "1987-07-13")
+    assert got == ("1979-01-05", "Armed Forces")  # not the 1977 bonus-track album

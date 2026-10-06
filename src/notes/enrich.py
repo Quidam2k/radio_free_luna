@@ -268,6 +268,40 @@ def first_release(recordings: List[Dict]) -> Tuple[Optional[str], Optional[str]]
     return first, (min(albums)[1] if albums else None)
 
 
+def _lists_title(release: Optional[Dict], title: str) -> bool:
+    want = norm_title(title)
+    return any(norm_title(t.get("title")) == want
+               for m in (release or {}).get("media") or [] for t in m.get("tracks") or [])
+
+
+def original_album(client, recordings: List[Dict], title: str, first: Optional[str],
+                   max_groups: int = 3) -> Optional[Tuple[str, str]]:
+    """(date, album) when a studio album older than `first` really carried the song.
+
+    Search hits are often reissues (Armed Forces 1987 CD for a 1979 song) or a
+    deluxe edition that adds the song as a bonus track to an older album (My
+    Aim Is True 2026), so an older album only counts when one of the releases
+    from its first year lists the title.
+    """
+    groups = {}
+    for r in recordings:
+        for rel in r.get("releases") or []:
+            rg = rel.get("release-group") or {}
+            if rg.get("id") and rg.get("primary-type") == "Album" and not rg.get("secondary-types"):
+                groups.setdefault(rg["id"], rel.get("title"))
+    found = []
+    for rg_id in list(groups)[:max_groups]:
+        rg = sources.mb_release_group(client, rg_id) or {}
+        date = rg.get("first-release-date") or ""
+        if not date[:4].isdigit() or (first and date[:4] >= first[:4]):
+            continue
+        early = sorted((rel.get("date") or "", rel["id"]) for rel in rg.get("releases") or []
+                       if (rel.get("date") or "")[:4] == date[:4] and rel.get("id"))
+        if any(_lists_title(sources.mb_release(client, rid), title) for _, rid in early[:3]):
+            found.append((date, rg.get("title") or groups[rg_id]))
+    return min(found) if found else None
+
+
 # --- Wikipedia resolution -------------------------------------------------------
 
 
@@ -347,6 +381,9 @@ class SongEnricher:
         if recording:
             ids["mb_recording"] = recording["id"]
             date, album = first_release(recs)
+            older = original_album(self.client, recs, clean, date)
+            if older:
+                date, album = older
             facts += mb_facts(recording, work, date, album)
             ac = recording.get("artist-credit") or []
             if ac and isinstance(ac[0], dict):

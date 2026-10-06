@@ -86,6 +86,14 @@ def mb_recording(client, mbid: str) -> Optional[Dict]:
         f"{MB}/recording/{mbid}?inc=work-rels+recording-rels+artist-credits+releases&fmt=json")
 
 
+def mb_release_group(client, mbid: str) -> Optional[Dict]:
+    return client.get_json(f"{MB}/release-group/{mbid}?inc=releases&fmt=json")
+
+
+def mb_release(client, mbid: str) -> Optional[Dict]:
+    return client.get_json(f"{MB}/release/{mbid}?inc=recordings&fmt=json")
+
+
 def mb_work(client, mbid: str) -> Optional[Dict]:
     return client.get_json(f"{MB}/work/{mbid}?inc=artist-rels+url-rels&fmt=json")
 
