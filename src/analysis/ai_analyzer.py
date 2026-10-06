@@ -15,6 +15,23 @@ from ..core.config import settings
 
 logger = logging.getLogger(__name__)
 
+class QuotaExhausted(Exception):  # #3886
+    """The OpenAI account has no credits. Retrying, or storing a fallback analysis
+    (which would mark the track analyzed forever), are both wrong: callers back off."""
+
+
+def is_quota_error(e: Exception) -> bool:  # #3886
+    return getattr(e, "code", None) == "insufficient_quota" or "insufficient_quota" in str(e)
+
+
+QUOTA_BACKOFF_START_S = 3600  # #3886
+QUOTA_BACKOFF_MAX_S = 6 * 3600  # #3886
+
+
+def next_quota_backoff(prev_s: int) -> int:  # #3886 1h, 2h, 4h, 6h, 6h...
+    return min(prev_s * 2, QUOTA_BACKOFF_MAX_S) if prev_s else QUOTA_BACKOFF_START_S
+
+
 @dataclass
 class AnalysisResult:
     themes: List[str]
@@ -62,6 +79,8 @@ class MusicAnalysisEngine:
             
             return analysis_result
             
+        except QuotaExhausted:  # #3886 never store a fallback for an out-of-credits failure
+            raise
         except Exception as e:
             logger.error(f"AI analysis failed for track {track.id}: {e}")
             return self._create_fallback_analysis(track)
@@ -144,6 +163,8 @@ class MusicAnalysisEngine:
                 return response.choices[0].message.content.strip()
                 
             except Exception as e:
+                if is_quota_error(e):  # #3886 no credits: retrying in 1-2 s cannot help
+                    raise QuotaExhausted(str(e)[:200]) from e
                 logger.warning(f"OpenAI API attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay)

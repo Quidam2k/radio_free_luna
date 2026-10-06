@@ -685,6 +685,8 @@ class RadioFreeLuna:
 
         Idles when the library is fully analyzed; paces API calls gently.
         """
+        from src.analysis.ai_analyzer import QuotaExhausted, next_quota_backoff  # #3886
+        quota_backoff = 0  # #3886
         while True:
             try:
                 track_ids = await asyncio.to_thread(
@@ -696,10 +698,16 @@ class RadioFreeLuna:
 
                 for track_id in track_ids:
                     await self.music_analyzer.analyze_and_store_track(track_id)
+                    quota_backoff = 0  # #3886
                     await asyncio.sleep(1)  # pace API usage
 
             except asyncio.CancelledError:
                 raise
+            except QuotaExhausted as e:  # #3886 one line per pause, not three per track
+                quota_backoff = next_quota_backoff(quota_backoff)
+                logger.warning(f"OpenAI credits exhausted; track analysis paused "
+                               f"{quota_backoff // 60} min ({e})")
+                await asyncio.sleep(quota_backoff)
             except Exception as e:
                 logger.error(f"Analysis worker error (retrying in 60s): {e}")
                 await asyncio.sleep(60)
