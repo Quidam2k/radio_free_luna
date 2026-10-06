@@ -198,6 +198,25 @@ def version_guard(facts, artist):
     return kept, info
 
 
+def original_artist_facts(facts, artist, stored_artist):
+    """Title-only match onto ANOTHER artist's stored row (#3522, #6038).
+
+    Only usable when that row is a cover and the playing artist is the one the
+    song article names (Supertramp playing, Goo Goo Dolls cover stored): the
+    Wikipedia song facts then describe the playing artist's original, while the
+    MusicBrainz and artist-intro facts belong to the cover and are dropped. Any
+    other cross-artist title match is a different song or recording -> nothing.
+    """
+    info = {"is_cover": is_cover(facts, stored_artist), "dropped": len(facts), "original": [artist]}
+    named = any(f.get("source") != "MusicBrainz" and mentions_artist(f.get("text", ""), artist)
+                for f in facts)
+    if not (info["is_cover"] and named):
+        return [], info
+    kept = [f for f in facts if f.get("source") != "MusicBrainz" and f.get("kind") != "artist"]
+    info["dropped"] = len(facts) - len(kept)
+    return kept, info
+
+
 # --- store --------------------------------------------------------------------
 
 
@@ -334,9 +353,7 @@ def lookup(artist: Optional[str], title: Optional[str], db_path=None,
                 " WHERE title_key = ? AND status IN ('ok', 'research')",
                 (norm_title(title, artist),),
             ).fetchall()
-            # #3522: another real artist's song is a different recording; only a
-            # blank/'Various Artists' tag may borrow the unique stored match.
-            if len(rows) == 1 and is_generic_artist(artist):
+            if len(rows) == 1:
                 row, matched_by = rows[0], "title-only"
         if row is None:
             return empty
@@ -348,7 +365,11 @@ def lookup(artist: Optional[str], title: Optional[str], db_path=None,
                 (row[0],),
             )
         ]
-        facts, guard = version_guard(facts, row[1])
+        if matched_by == "title-only" and not is_generic_artist(artist) \
+                and norm_artist(artist) != norm_artist(row[1]):
+            facts, guard = original_artist_facts(facts, artist, row[1])
+        else:
+            facts, guard = version_guard(facts, row[1])
         facts = facts[:limit]
         return {
             "found": bool(facts),

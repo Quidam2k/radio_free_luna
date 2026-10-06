@@ -366,9 +366,36 @@ def test_lookup_applies_guard_and_refuses_cross_artist_title_only(tmp_path):
                  "source_url": f["url"]} for f in COSTELLO])
     notes = store.lookup("Elvis Costello", "Peace, Love and Understanding", db_path=db, limit=20)
     assert notes["version_guard"]["dropped"] == 2 and len(notes["facts"]) == 6
-    # Nick Lowe's own recording must not borrow the Costello entry's facts
-    assert store.lookup("Nick Lowe", "Peace, Love and Understanding", db_path=db)["found"] is False
+    # Nick Lowe (the original, named in the article) gets the song facts, never
+    # the MusicBrainz facts about Costello's recording; an unrelated artist gets nothing
+    lowe = store.lookup("Nick Lowe", "Peace, Love and Understanding", db_path=db, limit=20)
+    assert lowe["matched_by"] == "title-only" and lowe["facts"]
+    assert all(f["source"] != "MusicBrainz" for f in lowe["facts"])
+    assert store.lookup("Bob Smith", "Peace, Love and Understanding", db_path=db)["found"] is False
     assert store.lookup("", "Peace, Love and Understanding", db_path=db)["found"] is True
+
+
+def test_title_only_original_artist_keeps_song_facts_from_cover_row(tmp_path):
+    # #6038 mirror: Supertramp playing, only the Goo Goo Dolls cover is stored
+    db = tmp_path / "notes.db"
+    rows = [("summary", '"Give a Little Bit" is the opening song on a 1977 album by Supertramp.', "Wikipedia"),
+            ("history", "The song was written years before the band recorded it.", "Wikipedia"),
+            ("release", "First released in 2005.", "MusicBrainz"),
+            ("cover_of", "The Goo Goo Dolls's recording is a cover.", "MusicBrainz"),
+            ("artist", "Goo Goo Dolls are an American rock band formed in 1986 in Buffalo, New York.",
+             "Wikipedia")]
+    with store.NotesStore(db) as s:
+        s.save("Goo Goo Dolls", "Give A Little Bit", "ok",
+               [{"kind": k, "text": t, "source_name": src, "source_url": "https://x"} for k, t, src in rows])
+    got = store.lookup("Supertramp", "Give A Little Bit", db_path=db)
+    assert sorted(f["kind"] for f in got["facts"]) == ["history", "summary"]
+    assert store.lookup("Goo Goo Dolls", "Give A Little Bit", db_path=db)["found"]
+    # a non-cover row never lends its facts to a different artist
+    with store.NotesStore(db) as s:
+        s.save("Example Band", "Oslo Nights", "ok", [
+            {"kind": "summary", "text": '"Oslo Nights" is a song by Example Band.',
+             "source_name": "Wikipedia", "source_url": "https://x"}])
+    assert store.lookup("Other Band", "Oslo Nights", db_path=db)["found"] is False
 
 
 def test_title_strip_drops_video_suffix():
