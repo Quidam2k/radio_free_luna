@@ -1,17 +1,8 @@
 @echo off
-REM Launch the Radio Free Luna server. Close this window to stop.
-cd /d "%~dp0"
-
-REM Kill anything already listening on port 8080 (taskkill /T kills the whole process tree)
-for /f "tokens=5" %%p in ('netstat -aon ^| findstr "LISTENING" ^| findstr ":8080 "') do (
-    echo Killing process tree rooted at PID %%p
-    taskkill /F /T /PID %%p >nul 2>&1
-)
-timeout /t 2 /nobreak >nul
-
-echo Starting Radio Free Luna server on http://0.0.0.0:8080 ...
-echo.
-python main.py
-echo.
-echo Server stopped.
+REM #3840: Radio Free Luna runs under the Pantheon Service Supervisor (one window,
+REM log at Q:\Pantheon\data\logs\services\rfl.log). This bat used to open its own
+REM window and kill whatever held :8080, which cut the supervised stream.
+echo Radio Free Luna runs under the Pantheon Service Supervisor.
+echo Start or restart it from Mission Control (its restart button) or the persona wake tool.
+echo Log: Q:\Pantheon\data\logs\services\rfl.log
 pause

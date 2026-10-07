@@ -826,4 +826,8 @@ async def main():
         await app_ref.shutdown()
 
 if __name__ == "__main__":
+    # #3840: one station per machine. A second copy (wake tool, a bat, a twin
+    # supervisor launch) exits 3 here, before it touches the port or the stream.
+    from src.single_instance import ensure_single_instance  # #3840
+    ensure_single_instance(logger)  # #3840
     asyncio.run(main())

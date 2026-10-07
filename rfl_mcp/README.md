@@ -37,8 +37,9 @@ It reads the DB directly, so it works with the station down.
 Since the station binds the LAN with listener tokens (#6914), `RFL_URL` should stay on
 `http://localhost:8080`: loopback needs no token.
 
-Or use `launch.bat` to start the RFL server itself first (the MCP server is
-a thin client over HTTP — it doesn't start RFL for you).
+The RFL server itself runs under the Pantheon Service Supervisor (#3840); wake it
+with Pantheon's `wake_rfl` tool (the MCP server is a thin client over HTTP and
+doesn't start RFL for you).
 
 ## Tools
 

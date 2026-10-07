@@ -24,7 +24,8 @@ from mcp.server.fastmcp import FastMCP
 RFL_URL = os.environ.get("RFL_URL", "http://localhost:8080").rstrip("/")
 
 NOT_RUNNING = (
-    "RFL server is not running (start Q:\\Development\\radio_free_luna\\launch.bat)"
+    "RFL server is not running (wake it with Pantheon's wake_rfl tool; it runs "
+    "under the Pantheon Service Supervisor)"  # #3840
 )
 
 mcp = FastMCP("rfl-dj")

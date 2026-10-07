@@ -1,7 +1,7 @@
 @echo off
-REM Radio Free Luna supervisor (#6914). Keeps the station up; started minimized at logon
-REM by the "RadioFreeLuna" scheduled task. Close this window to stop supervising
-REM (the server keeps running). Logs: logs\supervisor.log, logs\rfl_server.out.log
-title Radio Free Luna supervisor
-cd /d "%~dp0"
-".venv\Scripts\python.exe" scripts\rfl_supervisor.py
+REM #3840: retired. The legacy RFL supervisor window (#6914) is replaced by the
+REM Pantheon Service Supervisor, which keeps the station up (auto_restart) in one
+REM window. scripts\rfl_supervisor.py is kept on disk but nothing launches it.
+echo Radio Free Luna is supervised by the Pantheon Service Supervisor now.
+echo Log: Q:\Pantheon\data\logs\services\rfl.log
+pause
