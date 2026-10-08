@@ -388,7 +388,9 @@ def test_title_only_original_artist_keeps_song_facts_from_cover_row(tmp_path):
         s.save("Goo Goo Dolls", "Give A Little Bit", "ok",
                [{"kind": k, "text": t, "source_name": src, "source_url": "https://x"} for k, t, src in rows])
     got = store.lookup("Supertramp", "Give A Little Bit", db_path=db)
-    assert sorted(f["kind"] for f in got["facts"]) == ["history", "summary"]
+    # #4056: only facts that NAME the playing artist; "the band" could be either
+    assert sorted(f["kind"] for f in got["facts"]) == ["summary"]
+    assert got["artist"] == "Supertramp" and got["version_guard"]["stored_artist"] == "Goo Goo Dolls"
     assert store.lookup("Goo Goo Dolls", "Give A Little Bit", db_path=db)["found"]
     # a non-cover row never lends its facts to a different artist
     with store.NotesStore(db) as s:
@@ -396,6 +398,22 @@ def test_title_only_original_artist_keeps_song_facts_from_cover_row(tmp_path):
             {"kind": "summary", "text": '"Oslo Nights" is a song by Example Band.',
              "source_name": "Wikipedia", "source_url": "https://x"}])
     assert store.lookup("Other Band", "Oslo Nights", db_path=db)["found"] is False
+
+
+def test_title_only_cover_row_never_lends_its_own_facts_to_the_original(tmp_path):
+    # #4056 (Todd 2026-10-08): Kate Bush playing, only a cover row stored; the
+    # cover's chart run was read out as Kate Bush's under a header naming the cover act.
+    db = tmp_path / "notes.db"
+    rows = [("summary", '"Running Up That Hill" is a song by English singer Kate Bush.', "Wikipedia"),
+            ("chart", "The single reached number 9 in the UK in 2003.", "Wikipedia"),
+            ("history", "The band recorded it in one take in London.", "Wikipedia"),
+            ("cover_of", "Placebo's recording is a cover.", "MusicBrainz")]
+    with store.NotesStore(db) as s:
+        s.save("Placebo", "Running Up That Hill", "ok",
+               [{"kind": k, "text": t, "source_name": src, "source_url": "https://x"} for k, t, src in rows])
+    got = store.lookup("Kate Bush", "Running Up That Hill", db_path=db)
+    assert [f["kind"] for f in got["facts"]] == ["summary"]
+    assert got["artist"] == "Kate Bush"
 
 
 def test_title_strip_drops_video_suffix():

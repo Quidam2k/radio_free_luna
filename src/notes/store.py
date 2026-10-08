@@ -206,13 +206,15 @@ def original_artist_facts(facts, artist, stored_artist):
     Wikipedia song facts then describe the playing artist's original, while the
     MusicBrainz and artist-intro facts belong to the cover and are dropped. Any
     other cross-artist title match is a different song or recording -> nothing.
+    #4056 (Kate Bush, 2026-10-08): only the facts that NAME the playing artist are
+    kept -- the original/cover relationship. Facts about the cover's own chart run
+    or recording were being read out as the playing artist's.
     """
     info = {"is_cover": is_cover(facts, stored_artist), "dropped": len(facts), "original": [artist]}
-    named = any(f.get("source") != "MusicBrainz" and mentions_artist(f.get("text", ""), artist)
-                for f in facts)
-    if not (info["is_cover"] and named):
+    kept = [f for f in facts if f.get("source") != "MusicBrainz" and f.get("kind") != "artist"
+            and mentions_artist(f.get("text", ""), artist)]
+    if not (info["is_cover"] and kept):
         return [], info
-    kept = [f for f in facts if f.get("source") != "MusicBrainz" and f.get("kind") != "artist"]
     info["dropped"] = len(facts) - len(kept)
     return kept, info
 
@@ -365,15 +367,18 @@ def lookup(artist: Optional[str], title: Optional[str], db_path=None,
                 (row[0],),
             )
         ]
+        label = row[1]
         if matched_by == "title-only" and not is_generic_artist(artist) \
                 and norm_artist(artist) != norm_artist(row[1]):
             facts, guard = original_artist_facts(facts, artist, row[1])
+            label = artist  # #4056: the header names who is PLAYING, not the stored cover
+            guard["stored_artist"] = row[1]
         else:
             facts, guard = version_guard(facts, row[1])
         facts = facts[:limit]
         return {
             "found": bool(facts),
-            "artist": row[1],
+            "artist": label,
             "title": row[2],
             "matched_by": matched_by,
             "status": row[5],
