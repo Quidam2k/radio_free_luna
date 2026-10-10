@@ -99,6 +99,10 @@
                         <label for="requestName">Your name (spoken on air, optional):</label>
                         <input type="text" id="requestName" name="requested_by" maxlength="50" placeholder="e.g. Todd">
                     </div>
+                    <div class="form-group">
+                        <label for="requestMessage">Say something to the DJ (optional, answered on air):</label>
+                        <textarea id="requestMessage" name="message" maxlength="280" rows="2" placeholder="e.g. Driving home through the snow, this one's for my sister"></textarea>
+                    </div>
                     <button type="submit" class="btn btn-primary" id="requestBtn">Call It In</button>
                 </form>
                 <div id="requestResult" class="session-result"></div>

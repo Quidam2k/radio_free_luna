@@ -317,7 +317,8 @@ class RadioFreeLuna:
         @self.app.post("/api/requests")
         async def request_song(
             query: str = Body(..., description="Song title or artist to search for"),
-            requested_by: Optional[str] = Body(None, description="Listener's name, spoken on air")
+            requested_by: Optional[str] = Body(None, description="Listener's name, spoken on air"),
+            message: Optional[str] = Body(None, description="Caller's note to the DJ, answered on air (max 280)")
         ):
             """Request a song: search the library, queue the best match into the
             live broadcast, and have the DJ acknowledge the requester on air.
@@ -328,7 +329,7 @@ class RadioFreeLuna:
                 is available).
             """
             try:
-                request = SongRequest(query=query, requested_by=requested_by)
+                request = SongRequest(query=query, requested_by=requested_by, message=message)
 
                 if not self.session_manager:
                     return {"error": "Session manager not initialized"}
@@ -354,13 +355,14 @@ class RadioFreeLuna:
                 acknowledgment = None
                 if self.commentary_generator:
                     acknowledgment = await self.commentary_generator.generate_request_acknowledgment(
-                        track, request.requested_by, context
+                        track, request.requested_by, context, message=request.message
                     )
 
                 result = await self.broadcaster.queue_request(
                     track,
                     commentary_segment=acknowledgment,
                     requested_by=request.requested_by,
+                    context=context,
                 )
                 result["track"] = {
                     "title": track["title"],

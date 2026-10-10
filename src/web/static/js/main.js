@@ -514,6 +514,7 @@ class RadioFreeLunaUI {
     async requestSong() {
         const query = document.getElementById('requestQuery')?.value?.trim();
         const requested_by = document.getElementById('requestName')?.value?.trim() || null;
+        const message = document.getElementById('requestMessage')?.value?.trim() || null;
         const resultDiv = document.getElementById('requestResult');
         const btn = document.getElementById('requestBtn');
 
@@ -527,7 +528,7 @@ class RadioFreeLunaUI {
         try {
             const result = await this.makeRequest(`${this.apiURL}/requests`, {
                 method: 'POST',
-                body: JSON.stringify({ query, requested_by })
+                body: JSON.stringify({ query, requested_by, message })
             });
 
             if (result.error || !result.queued) {

@@ -124,9 +124,23 @@ class CommentaryRequest:
 class SongRequest:
     """Validated listener song request"""
 
-    def __init__(self, query: str, requested_by: Optional[str] = None):
+    def __init__(self, query: str, requested_by: Optional[str] = None,
+                 message: Optional[str] = None):
         self.query = self._validate_query(query)
         self.requested_by = self._validate_name(requested_by)
+        self.message = self._validate_message(message)
+
+    @staticmethod
+    def _validate_message(message: Optional[str]) -> Optional[str]:
+        """The caller's note to the DJ (#4154 call-ins): plain text, answered on air"""
+        if message is None:
+            return None
+        if not isinstance(message, str):
+            raise ValidationError("Message must be a string")
+        message = " ".join(message.split())  # one line: it is quoted into a prompt
+        if len(message) > 280:
+            raise ValidationError("Message too long (max 280 characters)")
+        return message or None
 
     @staticmethod
     def _validate_query(query: str) -> str:

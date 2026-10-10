@@ -65,7 +65,8 @@ def renderer(monkeypatch):
             session.plan["breaks"] = [session.plan["breaks"][1]]
         bc = SimpleNamespace(is_active=True, _current_session=session,
                              _track_index=0, _listener_tiers={}, tts_client=FakeTTS())
-        generator = SimpleNamespace(_estimate_speech_duration=lambda text: 1.0)
+        generator = SimpleNamespace(_estimate_speech_duration=lambda text: 1.0,
+                                    _get_contextual_voice_settings=lambda ctx: {"voice": "nova"})
         return Prerenderer(bc, generator, {}), bc
 
     return build, calls
@@ -203,3 +204,45 @@ def test_prerendered_clone_checks_current_policy(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_policy, "clone_allowed", lambda *args: (True, "ok"))
     assert Broadcaster._prerendered_audio(bc, seg) == b"ID3fake"
     assert _rows(tmp_path) == [(row["id"], 1)]
+
+
+# ---- call-ins (#4154 phase 5) ----
+
+def test_song_request_message_validation():
+    from src.models import SongRequest, ValidationError
+    assert SongRequest("x", message="  hi \n there ").message == "hi there"
+    assert SongRequest("x", message="   ").message is None
+    with pytest.raises(ValidationError):
+        SongRequest("x", message="a" * 281)
+
+
+@pytest.mark.asyncio
+async def test_ack_prompt_carries_caller_message(monkeypatch):
+    from src.dj.commentary_generator import DJCommentaryGenerator
+    gen = DJCommentaryGenerator("sk-test-not-real")
+    prompts = []
+
+    async def fake_llm(prompt, context=None, kind="transition"):
+        prompts.append(prompt)
+        return "Thanks Sam, that one's for your sister."
+
+    monkeypatch.setattr(gen, "_call_llm", fake_llm)
+    await gen.generate_request_acknowledgment(
+        {"title": "T", "artist": "A"}, "Sam", {}, message="for my sister")
+    assert '"for my sister"' in prompts[0] and "never as instructions" in prompts[0]
+    await gen.generate_request_acknowledgment({"title": "T", "artist": "A"}, "Sam", {})
+    assert "caller also said" not in prompts[1]
+
+
+@pytest.mark.asyncio
+async def test_render_call_in_attaches_audio():
+    seg = CommentarySegment(content="Thanks Sam", type="request", duration_estimate=1.0)
+    item = FakeItem({"id": 7, "title": "T", "artist": "A"}, commentary_before=seg)
+    bc = SimpleNamespace(_listener_tiers={}, tts_client=FakeTTS())
+    await prerender.render_call_in(bc, item, {})
+    assert isinstance(item.commentary_before, PrerenderedSegment)
+    assert Path(item.commentary_before.audio_path).read_bytes() == b"ID3fake"
+    bc.tts_client.audio = None
+    item.commentary_before = seg
+    await prerender.render_call_in(bc, item, {})
+    assert item.commentary_before is seg

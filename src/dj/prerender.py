@@ -85,7 +85,7 @@ async def write_text(
             text = drafts[0] if len(drafts) == 1 else await asyncio.to_thread(
                 pick_best, drafts, angle
             )
-            voice_settings = generator._get_storytelling_voice_settings()
+            voice_settings = generator._get_storytelling_voice_settings(context)
         else:
             prompt = (
                 "Write a station identification in one or two short sentences. "
@@ -145,6 +145,41 @@ def pick_best(drafts, angle) -> str:
     except Exception as exc:
         logger.warning("Prerender draft selection failed (%s)", type(exc).__name__)
     return drafts[0]
+
+
+async def synthesize(bc, seg, voice, daypart, track_id=None, prev_id=None):
+    """TTS a written segment and archive it; the plain segment back if TTS gave nothing
+    (the broadcaster then live-synths the text)."""
+    tiers = list(bc._listener_tiers.values())
+    audio = await bc.tts_client.synthesize_speech(
+        seg.content, {**(seg.voice_settings or {}), "voice": voice},
+        output="stream", audience=tiers)
+    if not audio:
+        return seg
+    row = await asyncio.to_thread(
+        spoken_store.save, seg.content, audio, seg.type, voice, daypart,
+        track_id, prev_id, voice_policy.is_clone_voice(voice))
+    return PrerenderedSegment(
+        content=seg.content, type=seg.type, duration_estimate=seg.duration_estimate,
+        voice_settings=seg.voice_settings,
+        audio_path=row["audio_path"], voice=voice, line_id=row["id"])
+
+
+async def render_call_in(bc, item, context) -> None:
+    """Pre-render a queued request's acknowledgment the moment it is queued, so the
+    call-in airs from a file. Never raises; a miss just leaves live synth."""
+    seg = item.commentary_before
+    try:
+        cfg = bc.tts_client.config
+        requested = (seg.voice_settings or {}).get("voice") or cfg.voice_model
+        voice = voice_policy.resolve_voice(requested, "stream", tts_url=cfg.api_url,
+                                           audience=list(bc._listener_tiers.values()))
+        daypart = getattr((context or {}).get("temporal"), "time_of_day", None) or "afternoon"
+        rendered = await synthesize(bc, seg, voice, daypart, item.track.get("id"))
+        if item.commentary_before is seg:  # not replaced meanwhile
+            item.commentary_before = rendered
+    except Exception as exc:
+        logger.warning("Call-in pre-render failed (%s)", type(exc).__name__)
 
 
 class Prerenderer:
@@ -207,7 +242,8 @@ class Prerenderer:
         daypart = getattr(context.get("temporal"), "time_of_day", None) or "afternoon"
         tiers = list(bc._listener_tiers.values())
         cfg = bc.tts_client.config
-        voice = voice_policy.resolve_voice(cfg.voice_model, "stream", tts_url=cfg.api_url,
+        requested = generator._get_contextual_voice_settings(context).get("voice") or cfg.voice_model
+        voice = voice_policy.resolve_voice(requested, "stream", tts_url=cfg.api_url,
                                            audience=tiers)
         prev_id = prev.get("id") if kind == "transition" else None
         row = await asyncio.to_thread(spoken_store.find_reusable, kind, voice, daypart,
@@ -224,19 +260,10 @@ class Prerenderer:
         seg = await write_text(generator, kind, track, prev, context, brk.get("angle", ""))
         if seg is None:
             return
-        audio = await bc.tts_client.synthesize_speech(
-            seg.content, {**(seg.voice_settings or {}), "voice": voice},
-            output="stream", audience=tiers)
-        if audio:  # else the plain text segment airs through live synth
-            row = await asyncio.to_thread(
-                spoken_store.save, seg.content, audio, kind, voice, daypart,
-                track.get("id"), prev_id, voice_policy.is_clone_voice(voice))
-            seg = PrerenderedSegment(
-                content=seg.content, type=seg.type, duration_estimate=seg.duration_estimate,
-                voice_settings=seg.voice_settings,
-                audio_path=row["audio_path"], voice=voice, line_id=row["id"])
+        seg = await synthesize(bc, seg, voice, daypart, track.get("id"), prev_id)
         if self._assign(item, seg):
-            logger.info("Prerender %s rendered%s", kind, "" if audio else " (text only)")
+            logger.info("Prerender %s rendered%s", kind,
+                        "" if isinstance(seg, PrerenderedSegment) else " (text only)")
 
     def _assign(self, item, seg) -> bool:
         """Attach only while the item is still ahead of the playhead in this session."""

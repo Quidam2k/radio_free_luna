@@ -155,6 +155,7 @@ class Broadcaster:
         self._session_active = False
         self._session_started_at: float = 0.0
         self._prerenderer = None  # #4154: renders planned breaks ahead of air time
+        self._call_in_tasks: set = set()  # request acknowledgments being pre-rendered
 
     # ---- lifecycle ----
 
@@ -295,6 +296,7 @@ class Broadcaster:
         track: Dict[str, Any],
         commentary_segment=None,
         requested_by: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Queue a listener-requested track to play after the current one.
 
@@ -314,6 +316,12 @@ class Broadcaster:
             requested_by=requested_by,
         )
         self._request_queue.append(item)
+        if commentary_segment is not None and self.tts_client is not None:
+            # #4154: render the acknowledgment now so the call-in airs from a file
+            from ..dj.prerender import render_call_in
+            task = asyncio.create_task(render_call_in(self, item, context))
+            self._call_in_tasks.add(task)  # hold a reference until it finishes
+            task.add_done_callback(self._call_in_tasks.discard)
         logger.info(
             f"Request queued: {track.get('title')} - {track.get('artist')}"
             + (f" (for {requested_by})" if requested_by else "")
