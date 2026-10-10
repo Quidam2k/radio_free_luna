@@ -510,7 +510,7 @@ class DJCommentaryGenerator:
         self.llm_override = (backend, model) pins a backend for this generator (the eval)."""
         system_content = self._system_prompt(context, kind)
         name, model = getattr(self, "llm_override", None) or (llm_backend.backend(), None)
-        if name in ("claude_cli", "local"):
+        if name in ("claude_cli", "local", "anthropic"):  # anthropic: #4154
             return await asyncio.to_thread(llm_backend.complete, system_content, prompt, name, model)
         return await self._call_openai_for_commentary(prompt, system_content)
 

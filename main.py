@@ -36,6 +36,7 @@ from src.analysis.ai_analyzer import MusicAnalysisEngine
 from src.analysis.lyrics_fetcher import LyricsFetcher
 from src.dj.session_manager import SessionManager
 from src.dj.commentary_generator import DJCommentaryGenerator
+from src.dj import spend as dj_spend_ledger
 from src.voice.tts_config import TTSConfig
 from src.voice.tts_client import TTSWebUIClient
 from src.voice.contextual_voice import ContextualVoiceAdapter
@@ -568,6 +569,11 @@ class RadioFreeLuna:
             if not self.broadcaster:
                 return {"active": False, "error": "Broadcaster not initialized"}
             return self.broadcaster.current_status()
+
+        @self.app.get("/api/dj/spend")
+        async def dj_spend():
+            """Anthropic DJ spend: rolling hour/day vs caps, by model and purpose (#4154)."""
+            return await asyncio.to_thread(dj_spend_ledger.summary)
     
     def setup_static_files(self):
         """Setup static file serving"""
