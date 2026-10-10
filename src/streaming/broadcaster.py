@@ -33,6 +33,8 @@ except ImportError:
 
 from .audio_processor import AudioProcessor
 from .crossfader import BasicCrossfader
+from ..dj import spoken_store
+from ..voice import voice_policy
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,7 @@ class Broadcaster:
         self._ffmpeg: Optional[asyncio.subprocess.Process] = None
         self._session_active = False
         self._session_started_at: float = 0.0
+        self._prerenderer = None  # #4154: renders planned breaks ahead of air time
 
     # ---- lifecycle ----
 
@@ -205,6 +208,12 @@ class Broadcaster:
         self._reader_task = asyncio.create_task(self._reader_loop())
         self._pump_task = asyncio.create_task(self._pump_loop())
 
+        if getattr(session, "plan", None) and self.tts_client is not None:
+            from ..dj.prerender import Prerenderer
+            self._prerenderer = Prerenderer(
+                self, self.session_manager.commentary_generator, context)
+            self._prerenderer.start()
+
         return {
             "session_id": session.session_id,
             "theme": session.theme,
@@ -221,6 +230,10 @@ class Broadcaster:
         self._session_active = False
         if self._skip_event:
             self._skip_event.set()
+
+        if self._prerenderer is not None:
+            await self._prerenderer.stop()
+            self._prerenderer = None
 
         if self._pump_task and not self._pump_task.done():
             self._pump_task.cancel()
@@ -493,6 +506,46 @@ class Broadcaster:
                     return s
         return seg
 
+    def _prerendered_audio(self, segment) -> Optional[bytes]:
+        """Archived audio for a pre-rendered segment, or None for live synth (#4154).
+
+        A clone voice is re-checked against who is listening now: the audience may have
+        changed since the line was rendered."""
+        path = getattr(segment, "audio_path", None)
+        if not path or not os.path.isfile(path):
+            return None
+        voice = getattr(segment, "voice", None)
+        if voice_policy.is_clone_voice(voice):
+            ok, reason = voice_policy.clone_allowed(
+                "stream", self.tts_client.config.api_url, list(self._listener_tiers.values()))
+            if not ok:
+                logger.warning(f"Pre-rendered clone line not aired ({reason}); live synth instead")
+                return None
+        try:
+            with open(path, "rb") as f:
+                audio = f.read()
+            if getattr(segment, "line_id", None) is not None:
+                spoken_store.mark_aired(segment.line_id)
+            return audio
+        except Exception as e:
+            logger.warning(f"Pre-rendered line unreadable; live synth instead: {e}")
+            return None
+
+    def _archive_spoken(self, segment, audio: bytes) -> None:
+        """Keep the text + audio of a live-synthesized line too (#4154). Never raises."""
+        try:
+            cfg = self.tts_client.config
+            tiers = list(self._listener_tiers.values())
+            requested = (getattr(segment, "voice_settings", None) or {}).get("voice", cfg.voice_model)
+            voice = voice_policy.resolve_voice(requested, "stream", tts_url=cfg.api_url,
+                                               audience=tiers)
+            context = getattr(self._current_session, "context_snapshot", None) or {}
+            daypart = getattr(context.get("temporal"), "time_of_day", None) or "afternoon"
+            spoken_store.save(segment.content, audio, getattr(segment, "type", "line"), voice,
+                              daypart, private=voice_policy.is_clone_voice(voice))
+        except Exception as e:
+            logger.warning(f"Could not archive spoken line: {e}")
+
     async def _mix_commentary_into(
         self, body: "AudioSegment", segment
     ) -> "AudioSegment":
@@ -506,12 +559,15 @@ class Broadcaster:
             if not text:
                 return body
 
-            voice_settings = getattr(segment, "voice_settings", None)
-            audio_bytes = await self.tts_client.synthesize_speech(
-                text, voice_settings, output="stream",
-                audience=list(self._listener_tiers.values()))
-            if not audio_bytes:
-                return body
+            audio_bytes = await asyncio.to_thread(self._prerendered_audio, segment)
+            if audio_bytes is None:
+                voice_settings = getattr(segment, "voice_settings", None)
+                audio_bytes = await self.tts_client.synthesize_speech(
+                    text, voice_settings, output="stream",
+                    audience=list(self._listener_tiers.values()))
+                if not audio_bytes:
+                    return body
+                await asyncio.to_thread(self._archive_spoken, segment, audio_bytes)
 
             def _decode_and_mix() -> "AudioSegment":
                 voice = self._conform(AudioSegment.from_file(io.BytesIO(audio_bytes)))

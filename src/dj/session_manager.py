@@ -139,10 +139,13 @@ class SessionManager:
             # LM Studio not running, malformed responses) must not abort
             # session creation — Phase 1 doesn't render commentary anyway.
             try:
+                # A planned set only needs its opening now: the broadcaster's
+                # prerenderer writes the planned breaks a few tracks ahead (#4154)
                 commentary_segments = await self.generate_session_commentary(
                     sequenced_tracks,
                     theme,
-                    context
+                    context,
+                    opening_only=bool(plan),
                 )
             except Exception as e:
                 logger.warning(f"Commentary generation failed; continuing with empty commentary: {e}")
@@ -617,7 +620,8 @@ class SessionManager:
     async def generate_session_commentary(self, 
                                         tracks: List[TrackSequenceItem], 
                                         theme: str,
-                                        context: Dict) -> List[CommentarySegment]:
+                                        context: Dict,
+                                        opening_only: bool = False) -> List[CommentarySegment]:
         """Generate commentary for the entire session"""
         
         commentary_segments = []
@@ -628,6 +632,8 @@ class SessionManager:
             theme, first_track, context
         )
         commentary_segments.append(opening)
+        if opening_only:
+            return commentary_segments
         
         # Transition commentary between tracks
         for i in range(len(tracks) - 1):
