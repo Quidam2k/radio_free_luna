@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..core.database import get_db, Track, TrackAnalysis, DJSession, ContextualSession
 from ..analysis.ai_analyzer import MusicAnalysisEngine
 from .commentary_generator import DJCommentaryGenerator, CommentarySegment
+from . import planner  # #4154
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ class DJSessionInfo:
     tracks: List[TrackSequenceItem]
     commentary_segments: List[CommentarySegment]
     context_snapshot: Dict
+    plan: Optional[Dict] = None  # #4154 planner output: breaks + why per track
 
 class SessionManager:
     def __init__(self, database_url: str, openai_api_key: str, base_url: Optional[str] = None):
@@ -112,20 +114,26 @@ class SessionManager:
         logger.info(f"Creating session {session_id} for theme '{theme}', duration {duration_minutes} minutes")
         
         try:
-            # Find candidate tracks for the theme
-            candidate_tracks = await self.find_tracks_for_theme(theme, context)
-            
-            if not candidate_tracks:
-                raise ValueError(f"No tracks found for theme '{theme}'")
-            
-            # Sequence tracks for optimal flow
-            sequenced_tracks = await self.sequence_tracks(
-                candidate_tracks, 
-                duration_minutes, 
-                theme, 
-                context,
-                parameters
-            )
+            # #4154: the Anthropic planner programs the set when DJ_PLANNER=anthropic;
+            # any failure (cap, API, bad plan) falls back to the scoring sequencer
+            plan = await self._planned_sequence(theme, duration_minutes, context)                 if planner.enabled() else None
+            if plan:
+                sequenced_tracks = plan.pop("sequence")
+            else:
+                # Find candidate tracks for the theme
+                candidate_tracks = await self.find_tracks_for_theme(theme, context)
+
+                if not candidate_tracks:
+                    raise ValueError(f"No tracks found for theme '{theme}'")
+
+                # Sequence tracks for optimal flow
+                sequenced_tracks = await self.sequence_tracks(
+                    candidate_tracks,
+                    duration_minutes,
+                    theme,
+                    context,
+                    parameters
+                )
             
             # Generate commentary for the session. Failures here (no API key,
             # LM Studio not running, malformed responses) must not abort
@@ -160,7 +168,8 @@ class SessionManager:
                 duration_minutes=duration_minutes,
                 tracks=sequenced_tracks,
                 commentary_segments=commentary_segments,
-                context_snapshot=context
+                context_snapshot=context,
+                plan=plan,
             )
             
             logger.info(f"Session {session_id} created successfully with {len(sequenced_tracks)} tracks")
@@ -170,6 +179,27 @@ class SessionManager:
             logger.error(f"Failed to create session: {e}")
             raise e
     
+    async def _planned_sequence(self, theme: str, duration_minutes: int,
+                                context: Dict) -> Optional[Dict]:
+        """The planner's set as TrackSequenceItems plus its break plan, or None (#4154)."""
+        temporal = (context or {}).get("temporal")
+        daypart = getattr(temporal, "time_of_day", None) or "afternoon"
+        summary = self.commentary_generator._build_context_summary(context or {})
+        try:
+            plan = await asyncio.to_thread(planner.plan_set, theme, duration_minutes,
+                                           summary, daypart)
+        except Exception as e:
+            logger.warning(f"Planner failed; falling back to the sequencer: {e}")
+            return None
+        sequence, current_time = [], "00:00:00"
+        for position, track in enumerate(plan["tracks"], start=1):
+            sequence.append(TrackSequenceItem(
+                track=track, position=position, start_time=current_time,
+                context_relevance_score=1.0 if track.get("match") else 0.5))
+            current_time = self.add_time(current_time, track.get("duration") or 0)
+        plan["sequence"] = sequence
+        return plan
+
     async def find_tracks_for_theme(self, theme: str, context: Dict) -> List[Dict]:
         """Find tracks that match the theme and context.
 
