@@ -47,6 +47,21 @@ CREATE TABLE IF NOT EXISTS facts (
     origin      TEXT NOT NULL DEFAULT 'auto'  -- auto (batch-owned) | research (never overwritten)
 );
 CREATE INDEX IF NOT EXISTS facts_song ON facts(song_key);
+CREATE TABLE IF NOT EXISTS lyrics (  -- #8201: one row per song, shared by RFL and Audiplex
+    song_key     TEXT PRIMARY KEY,   -- same key as songs.key
+    artist       TEXT,
+    title        TEXT,
+    album        TEXT,
+    duration     REAL,
+    status       TEXT NOT NULL,      -- ok | instrumental | nomatch | error
+    plain        TEXT,
+    synced       TEXT,               -- LRC, when the source has it
+    instrumental INTEGER NOT NULL DEFAULT 0,
+    lrclib_id    INTEGER,
+    source       TEXT NOT NULL,      -- lrclib | genius
+    detail       TEXT,
+    fetched_at   TEXT NOT NULL
+);
 """
 
 # Ordered roughly by how well each kind plays on air.
@@ -232,7 +247,8 @@ class NotesStore:
     def __init__(self, path=DEFAULT_DB):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), timeout=10)
+        self.conn = sqlite3.connect(str(self.path), timeout=30)
+        self.conn.execute("PRAGMA busy_timeout = 30000")
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.conn.executescript(SCHEMA)
@@ -314,6 +330,29 @@ class NotesStore:
                 n += 1
         return n
 
+    def lyrics_status(self, key: str) -> Optional[str]:
+        row = self.conn.execute("SELECT status FROM lyrics WHERE song_key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def save_lyrics_batch(self, rows: Iterable[Dict]) -> None:
+        """Upsert lyrics rows in ONE transaction: a failed batch writes nothing."""
+        now = _now()
+        with self.conn:
+            self.conn.executemany(
+                "INSERT INTO lyrics (song_key, artist, title, album, duration, status, plain,"
+                " synced, instrumental, lrclib_id, source, detail, fetched_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(song_key) DO UPDATE SET artist=excluded.artist,"
+                " title=excluded.title, album=excluded.album, duration=excluded.duration,"
+                " status=excluded.status, plain=excluded.plain, synced=excluded.synced,"
+                " instrumental=excluded.instrumental, lrclib_id=excluded.lrclib_id,"
+                " source=excluded.source, detail=excluded.detail, fetched_at=excluded.fetched_at",
+                [(r["key"], r.get("artist"), r.get("title"), r.get("album"), r.get("duration"),
+                  r["status"], r.get("plain"), r.get("synced"), int(bool(r.get("instrumental"))),
+                  r.get("lrclib_id"), r.get("source", "lrclib"), r.get("detail"), now)
+                 for r in rows],
+            )
+
     def stats(self) -> Dict:
         rows = self.conn.execute("SELECT status, COUNT(*) FROM songs GROUP BY status").fetchall()
         out = dict(rows)
@@ -391,6 +430,81 @@ def lookup(artist: Optional[str], title: Optional[str], db_path=None,
         return empty
     finally:
         conn.close()
+
+
+# --- lyrics read path (#8201) -------------------------------------------------
+# Prompts and speech only ever get lyric_phrase(): one short line. Full text is
+# for on-demand lookups ("the verse about X"), never auto-injected.
+
+_SECTION_TAG = re.compile(r"^\s*[\[\(].*[\]\)]\s*$")
+
+
+def lyrics(artist: Optional[str], title: Optional[str], db_path=None,
+           timeout: float = 1.0) -> Dict:
+    """Stored lyrics for one song. Never raises; unknown -> found=False."""
+    empty = {"found": False, "artist": artist, "title": title}
+    path = Path(db_path or DEFAULT_DB)
+    if not title or not path.exists():
+        return empty
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=timeout)
+    except sqlite3.Error:
+        return empty
+    try:
+        row = conn.execute(
+            "SELECT artist, title, status, plain, synced, source, lrclib_id FROM lyrics"
+            " WHERE song_key = ?", (song_key(artist, title),)).fetchone()
+        if row is None or row[2] not in ("ok", "instrumental"):
+            return empty
+        return {"found": True, "artist": row[0], "title": row[1],
+                "instrumental": row[2] == "instrumental", "plain": row[3] or "",
+                "synced": row[4] or "", "source": row[5], "lrclib_id": row[6]}
+    except sqlite3.Error:  # includes a store that predates the lyrics table
+        return empty
+    finally:
+        conn.close()
+
+
+def pick_phrase(plain: str, min_words: int = 4, max_words: int = 12) -> str:
+    """The hook: the most-repeated short line, else the first short line."""
+    counts: Dict[str, int] = {}
+    first: Dict[str, int] = {}
+    shown: Dict[str, str] = {}
+    for i, line in enumerate((plain or "").splitlines()):
+        line = line.strip()
+        if not line or _SECTION_TAG.match(line):
+            continue
+        if not (min_words <= len(line.split()) <= max_words):
+            continue
+        norm = _fold(line)
+        counts[norm] = counts.get(norm, 0) + 1
+        first.setdefault(norm, i)
+        shown.setdefault(norm, line.rstrip(",;:-"))
+    if not counts:
+        return ""
+    best = min(counts, key=lambda n: (-counts[n], first[n]))
+    return shown[best]
+
+
+def lyric_phrase(artist: Optional[str], title: Optional[str], db_path=None) -> str:
+    """One short quotable line for a DJ prompt, or '' (fail-open)."""
+    found = lyrics(artist, title, db_path=db_path)
+    return pick_phrase(found.get("plain", "")) if found.get("found") else ""
+
+
+def find_verse(plain: str, query: str, limit: int = 3) -> List[str]:
+    """Stanzas mentioning the query, best match first (on-demand lookups only)."""
+    words = [w for w in re.findall(r"[a-z0-9']+", (query or "").casefold()) if len(w) > 2]
+    if not words:
+        return []
+    stanzas = [s.strip() for s in re.split(r"\n\s*\n", plain or "") if s.strip()]
+    scored = []
+    for i, s in enumerate(stanzas):
+        low = s.casefold()
+        score = sum(low.count(w) for w in words)
+        if score:
+            scored.append((-score, i, s))
+    return [s for _, _, s in sorted(scored)[:limit]]
 
 
 def format_facts(notes: Dict, max_facts: int = 4) -> List[str]:

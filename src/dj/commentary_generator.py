@@ -370,12 +370,28 @@ class DJCommentaryGenerator:
     def _facts_block(self, track: Optional[Dict]) -> str:
         """Prompt section that grounds claims about a song in stored, sourced facts (#6006)."""
         facts = self._sourced_facts(track)
+        hook = self._lyric_hook(track)
         if not facts:
             return ("No sourced facts are available for this song: say nothing specific "
-                    "about its history or meaning.")
+                    "about its history or meaning." + hook)
         lines = "".join(f"\n- {f['text']} ({f['source']})" for f in facts)
         return ("SOURCED FACTS about the song (weave in one or two; state nothing about "
-                "the song beyond these):" + lines)
+                "the song beyond these):" + lines + hook)
+
+    @staticmethod
+    def _lyric_hook(track: Optional[Dict]) -> str:
+        """One short lyric line (#8201); never the full lyrics."""
+        if not track:
+            return ""
+        try:
+            from src.notes.store import lyric_phrase
+            phrase = lyric_phrase(track.get("artist"), track.get("title"))
+        except Exception:
+            return ""
+        if not phrase:
+            return ""
+        return (f'\nLYRIC HOOK (optional; quote at most this one line, never more of the '
+                f'lyrics): "{phrase}"')
 
     def _build_transition_prompt(self, current_track: Dict, next_track: Dict, context: Dict, connection_info: Dict) -> str:
         """Build prompt for transition commentary"""
