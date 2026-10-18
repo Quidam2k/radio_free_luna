@@ -11,8 +11,9 @@ Pipeline per song:
      artist intro. Each fact keeps the URL it came from.
 
 No model rewrites anything, so nothing here can be invented; the worst case is
-fewer facts. Lyrics are never stored (copyright) - a 'theme' fact is only ever
-an encyclopedia sentence saying what the song is about.
+fewer facts. Lyrics never become facts - a 'theme' fact is only ever an
+encyclopedia sentence saying what the song is about. (Lyrics live in their own
+`lyrics` table, #8201: private cache, on-air use limited to one short line.)
 """
 
 import re
