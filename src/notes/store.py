@@ -2,7 +2,8 @@
 
 Serves RFL's own DJ first (#431: RFL becomes the DJ over Audiplex) and the
 Pantheon DJ bridge second. Every fact row carries the source it was copied
-from; nothing in this store is generated or paraphrased by a model.
+from. Model output is allowed only when built from stored sources and marked
+by origin ('lyrics_llm' theme tags, 'llm_rewrite' trivia; #8208).
 
 This module is deliberately stdlib-only (sqlite3 + re) so a caller in another
 repo's interpreter can import it, or shell out to `python -m src.notes.lookup`,
@@ -306,8 +307,12 @@ class NotesStore:
                 )
         return key
 
-    def add_facts(self, artist: str, title: str, facts: Iterable[Dict]) -> int:
-        """Append facts (e.g. from a web-research pass) without dropping existing ones."""
+    def add_facts(self, artist: str, title: str, facts: Iterable[Dict],
+                  origin: str = "research") -> int:
+        """Append facts (e.g. from a web-research pass) without dropping existing ones.
+
+        origin 'lyrics_llm' / 'llm_rewrite' (#8208) marks model output built only
+        from stored sources; like 'research' it survives a batch re-enrich."""
         key = song_key(artist, title)
         if not self.conn.execute("SELECT 1 FROM songs WHERE key = ?", (key,)).fetchone():
             self.save(artist, title, "research")
@@ -323,9 +328,9 @@ class NotesStore:
                     continue
                 self.conn.execute(
                     "INSERT INTO facts (song_key, kind, text, source_name, source_url, rank, origin)"
-                    " VALUES (?,?,?,?,?,?, 'research')",
+                    " VALUES (?,?,?,?,?,?,?)",
                     (key, f.get("kind", "history"), f["text"], f["source_name"],
-                     f["source_url"], f.get("rank", 1)),
+                     f["source_url"], f.get("rank", 1), origin),
                 )
                 n += 1
         return n
