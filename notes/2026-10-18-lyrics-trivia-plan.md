@@ -58,11 +58,21 @@ never supplies facts; it only rephrases stored, cited sentences.
 
 1. Sources, $0. `scripts/build_dj_notes.py --all` (MusicBrainz + Wikidata +
    Wikipedia, existing, resumable, ~1 req/s on MusicBrainz) over the remaining
-   ~27k songs. About 24 h. Start 10/18 night once the dump import has finished;
-   done ~10/20. Expected coverage 35-50%: the library is heavy on classical,
-   jazz and compilations, which have no Wikipedia song article.
+   ~27k songs. Started 10/18 16:43; measured ~11 s/song (not the 24 h first
+   guessed), so done ~10/22. Expected coverage 35-50%: the library is heavy on
+   classical, jazz and compilations, which have no Wikipedia song article.
 2. DJ-ready notes, ~$3.40. Haiku 5.5 rewrite of stored facts, rules as above,
    stored as facts with origin='llm_rewrite' next to the verbatim source fact.
-   10/20-10/21.
+   First pass done 10/18 (1,726 songs, 6,158 notes, $0.19); re-run over the
+   new sources ~10/22-10/23.
 3. Gaps after that: album-level facts (Wikipedia album articles) for the deep
-   cuts, ~10/22. Songfacts-style sites are out (#4314, no bulk scraping).
+   cuts, ~10/24.
+
+## Result (10/18 evening)
+- Lyrics: 16,007 of 30,256 songs (52.9%): 14,516 with words, 1,491
+  instrumental. 14,221 have no match, ~5,266 of them classical / swing-era
+  instrumentals (2,384 Mozart), so about 64% of vocal songs are covered.
+- Theme tags: Sonnet 5.5 batches over 14,247 lyric songs: 14,232 tagged, 15
+  parse failures, $12.48 actual (batch rate, not in the radio spend ledger).
+  20-song spot check: all 20 fit the words (e.g. Talking Heads 'Road to
+  Nowhere': journey without destination ... Mood: upbeat resignation). Songfacts-style sites are out (#4314, no bulk scraping).
