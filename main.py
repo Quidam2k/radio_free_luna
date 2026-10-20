@@ -401,6 +401,13 @@ class RadioFreeLuna:
             from src.notes.store import lookup
             return lookup(artist, title, limit=limit)
 
+        # Themed sets picked by meaning (#949); fail-open, empty list when unknown
+        @self.app.get("/api/themes/{theme}")
+        async def get_theme_set(theme: str, min_score: int = 2):
+            from src.notes.themes import songs
+            rows = songs(theme, min_score=min_score)
+            return {"theme": theme, "count": len(rows), "songs": rows}
+
         # Root endpoint - serve web interface
         @self.app.get("/")
         async def read_root():

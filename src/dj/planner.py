@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import Text, cast, false, func, or_, select
 
 from ..core.database import get_db, Track, TrackAnalysis
+from ..notes import themes
+from ..notes.store import song_key
 from . import llm_backend
 
 logger = logging.getLogger(__name__)
@@ -54,10 +56,74 @@ def enabled() -> bool:
     return os.getenv("DJ_PLANNER", "").strip().lower() == "anthropic"
 
 
+def _theme_set(theme: str) -> dict[str, int]:
+    """song_key -> score for the first #949 theme set named in `theme`, else {}."""
+    for name in [theme.strip().lower()] + re.findall(r"\w+", theme.lower()):
+        rows = themes.songs(name)
+        if rows:
+            return {row["song_key"]: row["score"] for row in rows}
+    return {}
+
+
+def _theme_set_pool(keys: dict[str, int], size: int, now: datetime) -> list[dict]:
+    """Pool drawn only from a theme set (#949); tracks need no TrackAnalysis row."""
+    db = get_db()
+    try:
+        recent_artists = set(db.scalars(
+            select(func.lower(Track.artist)).where(
+                Track.last_played >= now - timedelta(hours=2),
+                Track.artist.is_not(None),
+            ).distinct()
+        ))
+        query = select(Track, TrackAnalysis).outerjoin(
+            TrackAnalysis, TrackAnalysis.track_id == Track.id
+        ).where(
+            or_(Track.last_played.is_(None), Track.last_played < now - timedelta(hours=24)),
+            Track.duration > 0, Track.duration <= 900, Track.title.is_not(None),
+        ).order_by(func.random())
+        pool, seen_keys, artist_counts = [], set(), {}
+        for track, analysis in db.execute(query):
+            key = song_key(track.artist, track.title)
+            artist = (track.artist or "").lower()
+            if (key not in keys or key in seen_keys or artist in recent_artists
+                    or artist_counts.get(artist, 0) >= 3):
+                continue
+            item = {name: getattr(track, name) for name in (
+                "id", "title", "artist", "album", "year", "genre", "duration",
+                "file_path", "play_count", "last_played",
+            )}
+            try:
+                tags = json.loads(analysis.themes) if analysis and isinstance(analysis.themes, str) else []
+            except (TypeError, ValueError):
+                tags = []
+            item.update(
+                themes=tags if isinstance(tags, list) else [],
+                mood_valence=analysis.mood_valence if analysis else None,
+                energy_level=analysis.energy_level if analysis else None,
+                danceability=analysis.danceability if analysis else None,
+                summary=analysis.summary if analysis else None,
+                cultural_context="", match=True, theme_score=keys[key],
+            )
+            pool.append(item)
+            seen_keys.add(key)
+            artist_counts[artist] = artist_counts.get(artist, 0) + 1
+        # strongest fits first, random within a score (the query already shuffled)
+        pool.sort(key=lambda item: -item["theme_score"])
+        return pool[:size]
+    finally:
+        db.close()
+
+
 def build_pool(theme: str, size: int = 120, now: datetime | None = None) -> list[dict]:
     if size <= 0:
         return []
     now = now if now is not None else datetime.utcnow()
+    keys = _theme_set(theme)
+    if keys:
+        pool = _theme_set_pool(keys, size, now)
+        if len(pool) >= min(size, 20):
+            return pool
+        logger.info("theme set for %r gave only %d tracks; using keyword pool", theme, len(pool))
     words = set(word for word in re.findall(r"\w+", theme.lower()) if len(word) >= 3)
     columns = (
         cast(TrackAnalysis.themes, Text), TrackAnalysis.summary,
