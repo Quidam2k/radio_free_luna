@@ -129,36 +129,51 @@ def message_params(theme: str, content: str, model: str) -> dict:
         # 5.5 models think by default; with a small budget the thinking ate the
         # whole answer (72% empty on the first run), so turn it off here.
         "max_tokens": 150,
-        "thinking": {"type": "disabled"},
+        # Sonnet 5.5 refuses "disabled"; its no-thinking mode is "between_tools"
+        "thinking": {"type": "between_tools" if "sonnet" in model else "disabled"},
         "system": system_prompt(theme),
         "messages": [{"role": "user", "content": content}],
     }
 
 
-def candidates(theme: str, limit: int | None) -> Iterator[tuple[dict, dict]]:
+def haiku_scored(theme: str, min_score: int) -> set[str]:
+    with closing(connect_ro(NOTES_DB)) as db:
+        return {row["song_key"] for row in db.execute(
+            "SELECT song_key FROM theme_sets WHERE theme=? AND score>=? AND model=?",
+            (theme, min_score, MODEL))}
+
+
+def candidates(theme: str, limit: int | None, model: str = MODEL,
+               rescore_min: int | None = None) -> Iterator[tuple[dict, dict]]:
+    """New songs for Haiku, or (rescore_min) Haiku's picks >= that score for Sonnet's
+    final call: the spot-check found Haiku too generous (14/30 of its fits held)."""
     validate_theme(theme)
     if limit == 0:
         return
-    already_tagged = tagged_keys(theme)
+    wanted = haiku_scored(theme, rescore_min) if rescore_min is not None else None
+    already_tagged = tagged_keys(theme) if wanted is None else set()
     lyric_themes, instrumentals = lyric_context()
     index = 0
     for track in library_tracks():
-        if track["song_key"] in already_tagged:
+        if track["song_key"] in already_tagged or (
+                wanted is not None and track["song_key"] not in wanted):
             continue
         content, source = build_content(track, lyric_themes, instrumentals)
         meta = {name: track[name] for name in ("song_key", "artist", "title")}
         meta["source"] = source
         yield {
             "custom_id": f"t{index}",
-            "params": message_params(theme, content, MODEL),
+            "params": message_params(theme, content, model),
         }, meta
         index += 1
         if limit is not None and index >= limit:
             break
 
 
-def submit(theme: str, limit: int | None, dry_run: bool) -> None:
-    rows = candidates(theme, limit)
+def submit(theme: str, limit: int | None, dry_run: bool,
+           rescore_min: int | None = None) -> None:
+    model = CHECK_MODEL if rescore_min is not None else MODEL
+    rows = candidates(theme, limit, model, rescore_min)
     if dry_run:
         count, tokens, first = 0, 0.0, None
         for request, _ in rows:
@@ -170,7 +185,7 @@ def submit(theme: str, limit: int | None, dry_run: bool) -> None:
             if first is None:
                 first = request
         estimate = cost(
-            MODEL, {"input_tokens": tokens, "output_tokens": count * 30}
+            model, {"input_tokens": tokens, "output_tokens": count * 30}
         )
         print(
             f"count={count} estimated_input_tokens={tokens:.0f} "
@@ -194,7 +209,7 @@ def submit(theme: str, limit: int | None, dry_run: bool) -> None:
         state.append({
             "batch_id": batch_id,
             "kind": theme,
-            "model": MODEL,
+            "model": model,
             "submitted_at": (
                 batch.get("created_at") or datetime.now(timezone.utc).isoformat()
             ),
@@ -432,6 +447,8 @@ def main() -> None:
     sub.add_argument("theme")
     sub.add_argument("--limit", type=int)
     sub.add_argument("--dry-run", action="store_true")
+    sub.add_argument("--rescore-min", type=int,
+                     help="re-judge Haiku's songs scored >= N with Sonnet 5.5")
 
     for command in ("status", "collect"):
         commands.add_parser(command).add_argument("batch_id")
@@ -446,7 +463,7 @@ def main() -> None:
     if args.command == "submit":
         if args.limit is not None and args.limit < 0:
             raise ValueError("--limit must be nonnegative")
-        submit(args.theme, args.limit, args.dry_run)
+        submit(args.theme, args.limit, args.dry_run, args.rescore_min)
     elif args.command == "status":
         validate_batch_id(args.batch_id)
         print(json.dumps(batch_status(args.batch_id), ensure_ascii=True, indent=2))
