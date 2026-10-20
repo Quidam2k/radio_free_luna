@@ -221,6 +221,10 @@ async def main():
                     continue
 
                 stats["sets_planned"] += 1
+                print(f"set {set_number} ({ascii(theme)}):", flush=True)
+                for position, track in enumerate(tracks, start=1):
+                    print(f"  {position:2d}. {ascii(track.get('artist') or '?')} - "
+                          f"{ascii(track.get('title') or '?')}", flush=True)
                 for brk in breaks:
                     kind = brk.get("kind")
                     index = brk.get("before_index")
