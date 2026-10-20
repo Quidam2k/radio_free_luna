@@ -408,6 +408,25 @@ class RadioFreeLuna:
             rows = songs(theme, min_score=min_score)
             return {"theme": theme, "count": len(rows), "songs": rows}
 
+        # Listener thumbs up/down on the playing track and the DJ line before it (#4164)
+        @self.app.post("/api/feedback")
+        async def post_feedback(payload: dict = Body(...)):
+            from src.dj import spoken_store
+            rating = {"up": 1, "down": -1}.get(str(payload.get("rating", "")).lower())
+            ids = {}
+            for name in ("track_id", "line_id"):
+                value = payload.get(name)
+                if value is not None:
+                    try:
+                        ids[name] = int(value)
+                    except (TypeError, ValueError):
+                        raise HTTPException(status_code=400, detail=f"{name} must be an integer")
+            if rating is None or not ids:
+                raise HTTPException(status_code=400,
+                                    detail="need rating up|down and a track_id or line_id")
+            await asyncio.to_thread(spoken_store.rate, rating, **ids)
+            return {"ok": True, "rating": rating, **ids}
+
         # Root endpoint - serve web interface
         @self.app.get("/")
         async def read_root():

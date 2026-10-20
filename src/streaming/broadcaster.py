@@ -96,6 +96,8 @@ class _CurrentTrack:
     duration: float
     started_at: float
     requested_by: Optional[str] = None
+    track_id: Optional[int] = None
+    line_id: Optional[int] = None  # spoken line aired before this track (#4164 ratings)
 
     def elapsed(self, now: float) -> float:
         return max(0.0, now - self.started_at)
@@ -143,6 +145,7 @@ class Broadcaster:
 
         self._current_session: Optional[Any] = None
         self._current_track: Optional[_CurrentTrack] = None
+        self._last_line_id: Optional[int] = None
         self._track_index: int = 0
         self._skip_event: Optional[asyncio.Event] = None
         self._request_queue: deque = deque()  # TrackSequenceItems from listener requests
@@ -357,6 +360,8 @@ class Broadcaster:
                 "duration": self._current_track.duration,
                 "elapsed": self._current_track.elapsed(loop_time),
                 "requested_by": self._current_track.requested_by,
+                "id": self._current_track.track_id,
+                "line_id": self._current_track.line_id,
             }
 
         return {
@@ -534,6 +539,7 @@ class Broadcaster:
                 audio = f.read()
             if getattr(segment, "line_id", None) is not None:
                 spoken_store.mark_aired(segment.line_id)
+                self._last_line_id = segment.line_id
             return audio
         except Exception as e:
             logger.warning(f"Pre-rendered line unreadable; live synth instead: {e}")
@@ -549,8 +555,9 @@ class Broadcaster:
                                                audience=tiers)
             context = getattr(self._current_session, "context_snapshot", None) or {}
             daypart = getattr(context.get("temporal"), "time_of_day", None) or "afternoon"
-            spoken_store.save(segment.content, audio, getattr(segment, "type", "line"), voice,
-                              daypart, private=voice_policy.is_clone_voice(voice))
+            row = spoken_store.save(segment.content, audio, getattr(segment, "type", "line"),
+                                    voice, daypart, private=voice_policy.is_clone_voice(voice))
+            self._last_line_id = row["id"]
         except Exception as e:
             logger.warning(f"Could not archive spoken line: {e}")
 
@@ -653,6 +660,7 @@ class Broadcaster:
 
                 # Spoken DJ commentary, ducked under the start of the track
                 commentary_seg = self._commentary_for_index(self._track_index)
+                self._last_line_id = None
                 if commentary_seg is not None and self.tts_client is not None:
                     body = await self._mix_commentary_into(body, commentary_seg)
 
@@ -662,6 +670,8 @@ class Broadcaster:
                     duration=len(body) / 1000.0,  # what actually airs (body excludes the carried tail)
                     started_at=loop.time(),
                     requested_by=getattr(track_item, "requested_by", None),
+                    track_id=track.get("id"),
+                    line_id=self._last_line_id,
                 )
                 await self._record_play(track)
 

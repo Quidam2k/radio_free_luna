@@ -29,6 +29,15 @@ class RadioFreeLunaUI {
     }
 
     bindEventListeners() {
+        // Thumbs up/down on the playing song and the DJ line before it (#4164)
+        const ratePanel = document.getElementById('nowPlayingRate');
+        if (ratePanel) {
+            ratePanel.addEventListener('click', (e) => {
+                const button = e.target.closest('button[data-rating]');
+                if (button) this.sendFeedback(button.dataset.target, button.dataset.rating);
+            });
+        }
+
         // Session form (dry-run)
         const sessionForm = document.getElementById('sessionForm');
         if (sessionForm) {
@@ -607,6 +616,9 @@ class RadioFreeLunaUI {
             }
 
             const track = status.current_track;
+            this.nowPlayingIds = { track_id: track.id, line_id: track.line_id };
+            document.querySelectorAll('#nowPlayingRate [data-target="line"], #rateDjLabel')
+                .forEach((el) => { el.style.display = track.line_id ? '' : 'none'; });
             panel.style.display = 'block';
             document.getElementById('nowPlayingTitle').textContent =
                 `${track.title} — ${track.artist}` +
@@ -624,6 +636,22 @@ class RadioFreeLunaUI {
             document.getElementById('nowPlayingProgress').style.width = `${pct}%`;
         } catch (error) {
             console.warn('Now-playing update failed:', error);
+        }
+    }
+
+    async sendFeedback(target, rating) {
+        const ids = this.nowPlayingIds || {};
+        const id = target === 'line' ? ids.line_id : ids.track_id;
+        const result = document.getElementById('rateResult');
+        if (!id) return;
+        try {
+            await this.makeRequest(`${this.apiURL}/feedback`, {
+                method: 'POST',
+                body: JSON.stringify({ rating, [`${target}_id`]: id }),
+            });
+            if (result) result.textContent = 'Thanks, noted.';
+        } catch (error) {
+            if (result) result.textContent = 'Could not save that.';
         }
     }
 

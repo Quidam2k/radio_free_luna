@@ -82,6 +82,15 @@
                     <div id="nowPlayingTitle" class="now-playing-title"></div>
                     <div id="nowPlayingMeta" class="now-playing-meta"></div>
                     <div class="now-playing-bar"><div id="nowPlayingProgress" class="now-playing-progress"></div></div>
+                    <div id="nowPlayingRate" class="now-playing-rate" style="margin-top: 8px;">
+                        <span>Song</span>
+                        <button type="button" data-target="track" data-rating="up" title="Thumbs up on this song">&#128077;</button>
+                        <button type="button" data-target="track" data-rating="down" title="Thumbs down on this song">&#128078;</button>
+                        <span id="rateDjLabel" style="margin-left: 12px;">DJ</span>
+                        <button type="button" data-target="line" data-rating="up" title="Thumbs up on what the DJ said">&#128077;</button>
+                        <button type="button" data-target="line" data-rating="down" title="Thumbs down on what the DJ said">&#128078;</button>
+                        <span id="rateResult" class="now-playing-meta" style="margin-left: 8px;"></span>
+                    </div>
                 </div>
                 <div id="streamResult" class="session-result"></div>
             </section>
