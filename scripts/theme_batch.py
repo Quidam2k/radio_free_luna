@@ -126,7 +126,10 @@ def build_content(
 def message_params(theme: str, content: str, model: str) -> dict:
     return {
         "model": model,
-        "max_tokens": 80,
+        # 5.5 models think by default; with a small budget the thinking ate the
+        # whole answer (72% empty on the first run), so turn it off here.
+        "max_tokens": 150,
+        "thinking": {"type": "disabled"},
         "system": system_prompt(theme),
         "messages": [{"role": "user", "content": content}],
     }
