@@ -2,7 +2,7 @@
 
 *Where every song tells a story, and context creates the perfect moment*
 
-**🎉 MAJOR BREAKTHROUGH** - Radio Free Luna is now **70-90% functional** with real audio processing! The system successfully processes MP3 files, extracts complete metadata, and streams to clients. Features smart crossfading, contextual awareness, and professional-grade audio processing infrastructure.
+Radio Free Luna is a self-hosted AI radio station. It scans your music library, builds notes on your tracks, and serves a continuous MP3 stream (`GET /stream.mp3`) with crossfades and generated DJ commentary between songs. It is under active development, so expect rough edges.
 
 Radio Free Luna builds comprehensive knowledge about your music collection, creating contextual playlists and DJ commentary that connects songs through themes, history, and cultural significance. Inspired by Chris in the Morning from Northern Exposure, this AI DJ understands not just music, but the world around it.
 
@@ -39,43 +39,44 @@ Radio Free Luna builds comprehensive knowledge about your music collection, crea
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.11 (the version the Dockerfile uses)
 - Music library in supported formats (MP3, FLAC, WAV, M4A, OGG)
 - OpenAI API key (optional, for full AI features)
 - TTS-WebUI (optional, for voice synthesis)
 
-### Installation & Startup (WORKING NOW!)
+### Installation & Startup
 
-1. **Download and navigate to the project**
+1. **Get the code and install dependencies** (a virtual environment is recommended)
 ```bash
+git clone https://github.com/Quidam2k/radio_free_luna.git
 cd radio_free_luna
+python -m venv .venv
+.venv/Scripts/activate        # Windows; on Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-2. **IMPORTANT: Dependencies are pre-installed in lib/ directory**
-   - ✅ All major dependencies (FastAPI, pydub, mutagen, etc.) already in `lib/`
-   - ✅ Additional audio libraries now installed  
-   - ✅ No virtual environment needed for basic testing
-
-3. **Configure environment (optional for testing)**
+2. **Configure the environment**
 ```bash
 cp .env.example .env
-# Edit .env with your music directories and API keys (optional)
+# Edit .env: set MUSIC_DIRECTORIES, plus API keys for the features you want
 ```
 
-4. **Start the system (works immediately!)**
+3. **Start the server**
 ```bash
 python main.py
 ```
 
-5. **Open web interface**
-   - Visit `http://localhost:8080` 
-   - System works in testing mode with sample audio files
+4. **Open the web interface** at `http://localhost:8080` (override the port with `PORT` in `.env`).
 
-### Current Status
-- ✅ **Web Interface**: 100% functional
-- ✅ **Audio Processing**: 70% functional (metadata extraction working)
-- ✅ **Streaming Infrastructure**: 90% functional (mock Icecast2 tested)
-- ✅ **Sample Audio**: 22 MP3 files validated and streaming-ready
+### Project Layout
+
+- `main.py` - FastAPI application entry point
+- `src/` - the station: `core/` (config, database, file monitor, listener auth), `analysis/` (AI analysis, lyrics), `context/` (time, weather, location), `dj/` (planner, commentary, personas, sessions), `voice/` (TTS), `streaming/` (broadcaster, crossfader, audio processing), `mixdown/`, `enrich/`, `notes/`, `corpus/`, and `web/` (static web UI)
+- `rfl_mcp/` - MCP server that exposes the station's API as agent tools (see its README)
+- `scripts/` - maintenance, enrichment and batch-rendering scripts
+- `docs/dj/` - DJ style guide and persona definitions
+- `tests/` - pytest suite
+- `Dockerfile`, `docker-compose.yml` - container setup
 
 ### Docker Setup
 
@@ -235,17 +236,15 @@ The system respects both the art of music and the science of recommendation, cre
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read our contributing guidelines and code of conduct.
+Contributions are welcome. Open an issue or pull request on GitHub.
 
 ## 📞 Support
 
-- Documentation: [Project Wiki]
-- Issues: [GitHub Issues]
-- Discussions: [GitHub Discussions]
+- Issues: [GitHub Issues](https://github.com/Quidam2k/radio_free_luna/issues)
 
 ---
 
