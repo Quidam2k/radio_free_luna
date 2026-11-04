@@ -125,7 +125,7 @@ def _no_archive_no_private_hosts(monkeypatch):
 def test_clone_detection(monkeypatch):
     monkeypatch.setenv("CLONE_VOICES", "chris")
     assert is_clone_voice("clone:chris")
-    assert is_clone_voice(r"Q:\x\data\voice_private\chris.wav")
+    assert is_clone_voice(r"D:\x\data\voice_private\chris.wav")
     assert is_clone_voice("Chris")
     assert not is_clone_voice("fable") and not is_clone_voice(None)
 

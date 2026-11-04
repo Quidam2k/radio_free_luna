@@ -96,5 +96,5 @@ class TestAudioProcessorAsync:
         assert audio.channels == 2
 
     def test_missing_file_returns_none(self):
-        audio = asyncio.run(AudioProcessor().process_audio_file("Q:/does/not/exist.mp3"))
+        audio = asyncio.run(AudioProcessor().process_audio_file("/does/not/exist.mp3"))
         assert audio is None

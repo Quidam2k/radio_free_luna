@@ -16,7 +16,7 @@ def store(tmp_path, monkeypatch):
 
 @pytest.fixture
 def remote(app):
-    return TestClient(as_client(app.app, "192.168.1.50"))
+    return TestClient(as_client(app.app, "203.0.113.50"))
 
 
 def test_remote_without_token_is_refused(store, remote):

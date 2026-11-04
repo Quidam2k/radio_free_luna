@@ -7,6 +7,7 @@ Usage:
 import asyncio
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -23,7 +24,7 @@ logging.basicConfig(
 
 async def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    folder = args[0] if args else "Q:/music"
+    folder = args[0] if args else os.getenv("MUSIC_ROOT", "music")
     out = args[1] if len(args) > 1 else "data/enrich/qmusic-dryrun.json"
     research = "--no-research" not in sys.argv
 

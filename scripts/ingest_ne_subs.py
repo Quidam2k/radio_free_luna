@@ -2,7 +2,7 @@
 """
 Ingest the 110 Northern Exposure DVD subtitles into the corpus (#6011).
 
-    Q:/Pantheon/data/context-harvest/northern-exposure/subs/s01..s06/*.srt
+    <subs-dir>/s01..s06/*.srt
       -> data/corpus/northern_exposure/SxxEyy.transcript.json   (source "srt:DVD")
 
 The SRT transcript is canonical: exact dialogue plus italic/music cue flags.
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -25,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.corpus import transcripts as T
 
-SUBS_DIR = Path("Q:/Pantheon/data/context-harvest/northern-exposure/subs")
+SUBS_DIR = Path(os.getenv("NE_SUBS_DIR", "data/corpus/subs"))
 OUT_DIR = Path("data/corpus/northern_exposure")
 
 

@@ -11,7 +11,7 @@ DJ_LLM=local       an OpenAI-compatible local server (#6914), LM Studio by defau
                    DJ_LOCAL_UNLOAD=ttl:<seconds> (default ttl:300, LM Studio unloads the
                    model after that much idle), after_call (`lms unload` right away), or never.
 DJ_LLM=anthropic   the Anthropic Messages API on its own key (#4154): ANTHROPIC_API_KEY from the
-                   environment, else read from DJ_ANTHROPIC_ENV_FILE (Q:/Pantheon/.env). Patter on
+                   environment, else read from DJ_ANTHROPIC_ENV_FILE. Patter on
                    DJ_PATTER_MODEL (claude-haiku-5-5), planning/picking on DJ_PLANNER_MODEL
                    (claude-sonnet-5-5). Raw HTTPS, not the SDK: anthropic 1.x needs anyio>=4 and
                    FastAPI 0.104 pins anyio<4. Every call is checked against and recorded in the

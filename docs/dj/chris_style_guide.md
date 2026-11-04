@@ -103,7 +103,7 @@ The reviewed segments contain none of the following; absence is the evidence.
 
 ## 8. Compact digest
 
-<!-- Injected into every DJ system prompt by src/dj/chris_style.py. Adapted for Radio Free Luna: our station and the listener's town replace KBHR and Cicely, and songs are named once (Todd's three-beat rule, #6005). -->
+<!-- Injected into every DJ system prompt by src/dj/chris_style.py. Adapted for Radio Free Luna: our station and the listener's town replace KBHR and Cicely, and songs are named once (the author's three-beat rule, #6005). -->
 
 
 - Open with show and station (here: Radio Free Luna), then greet the listener's town by name. A weather number, a wry turn. [S04E10@00000.9] [S03E11@00122.4]

@@ -34,7 +34,7 @@ from src.analysis.lyrics_fetcher import LyricsFetcher  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 RFL_DB = ROOT / "data" / "radio_free_luna.db"
-AUDIPLEX_DB = Path(r"Q:/Development/audiplex/server/audiplex.db")
+AUDIPLEX_DB = Path(os.getenv("AUDIPLEX_ROOT", str(ROOT.parent / "audiplex"))) / "server" / "audiplex.db"
 ENRICH_DIR = ROOT / "data" / "enrich"
 ENRICH_DIR.mkdir(parents=True, exist_ok=True)
 

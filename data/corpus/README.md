@@ -23,7 +23,7 @@ data/corpus/
 ```
 
 Everything except this README is **gitignored** (derived, and large). Re-runs
-regenerate it from Todd's local rips.
+regenerate it from the author's local rips.
 
 ### Normalized transcript (`<SxxEyy>.transcript.json`)
 
@@ -52,7 +52,7 @@ One source-agnostic shape, whatever produced it:
  "source":"asr:faster-whisper:small","method":"heuristic:position+radio+literary+shape"}
 ```
 
-## How it was built (Route A — local, from Todd's own media)
+## How it was built (Route A — local, from the author's own media)
 
 The "extract soft subtitles from the rips" idea was a dead end: the 13 local
 *Northern Exposure* episodes are 2007-era XviD **`.avi`** files with **no
@@ -106,7 +106,7 @@ that in is a follow-up; #989 delivers the corpus + tooling.
 For coverage beyond the 13 local episodes, `src/corpus/transcripts.py` already
 ships an SRT normalizer (`srt_to_segments`) so an OpenSubtitles fetch drops into
 the *same* extractor with no rework. It is **deferred** because it needs
-**Todd's own OpenSubtitles account/API key** (none is in `.env`), and any fetch
+**your own OpenSubtitles account/API key** (none is in `.env`), and any fetch
 must record the per-file source + licence and must not scrape sites whose terms
 forbid it. Fan-transcribed subtitles are user-generated; note their provenance.
 Not started — a separate go/no-go.

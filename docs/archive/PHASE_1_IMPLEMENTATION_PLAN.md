@@ -958,7 +958,7 @@ Before merging each task group:
 
 Before starting, confirm:
 
-1. **Resources**: Is Todd available full-time for 2-3 weeks?
+1. **Resources**: Is the author available full-time for 2-3 weeks?
 2. **Dependencies**: Is slowapi okay to add for rate limiting?
 3. **Database**: Should we support both SQLite and PostgreSQL for pooling?
 4. **Testing**: Create new test files or add to existing test_api.py?

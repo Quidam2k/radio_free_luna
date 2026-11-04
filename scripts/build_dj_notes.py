@@ -1,4 +1,4 @@
-"""Build sourced DJ notes for Todd's library, ride-mix folders first (#6006).
+"""Build sourced DJ notes for the local library, ride-mix folders first (#6006).
 
 Reads track artist/title from the Audiplex library (read-only), dedupes by the
 normalized song key, and enriches each song not already in data/dj_notes.db
@@ -20,6 +20,7 @@ Song sources (all read-only on Audiplex) combine: --played-since (play_stats),
 import argparse
 import json
 import logging
+import os
 import sqlite3
 import sys
 import time
@@ -31,10 +32,11 @@ sys.path.insert(0, str(ROOT))
 from src.notes.enrich import SongEnricher  # noqa: E402
 from src.notes.store import DEFAULT_DB, NotesStore, song_key  # noqa: E402
 
-AUDIPLEX_DB = Path(r"Q:\Development\audiplex\server\audiplex.db")
-# Todd's ride-mix folders (album rows in Audiplex, matching Pantheon's TEMPO_FOLDERS).
+_AUDIPLEX_ROOT = Path(os.getenv("AUDIPLEX_ROOT", str(ROOT.parent / "audiplex")))
+AUDIPLEX_DB = _AUDIPLEX_ROOT / "server" / "audiplex.db"
+# Ride-mix folders (album rows in Audiplex).
 RIDE_FOLDERS = ["Bike Music", "faster", "slower", "Individual"]
-AUDIPLEX_BUCKETS_DB = Path(r"Q:\Development\audiplex\data\dj\buckets.db")
+AUDIPLEX_BUCKETS_DB = _AUDIPLEX_ROOT / "data" / "dj" / "buckets.db"
 _TRACK_SQL = ("SELECT t.id, ar.name, t.title, al.title, t.file_path FROM tracks t"
               " JOIN albums al ON t.album_id = al.id"
               " LEFT JOIN artists ar ON t.artist_id = ar.id"
@@ -77,7 +79,7 @@ def library_songs(db: Path, folders=None):
 
 
 def played_songs(db: Path, since: str):
-    """Songs Todd started or finished in Audiplex since a date, most-played first."""
+    """Songs the user started or finished in Audiplex since a date, most-played first."""
     conn = _ro(db)
     rows = conn.execute(
         "SELECT ar.name, t.title FROM play_stats p JOIN tracks t ON t.id = p.track_id"
