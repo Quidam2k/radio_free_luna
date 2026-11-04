@@ -100,3 +100,11 @@ start_worker.bat
 
 # Enrichment data + snapshots (large, local)
 data/
+
+# Internal working material (kept locally, not published)
+/notes/
+/cascades/
+/.claude/
+NOTE-*
+session-state.md
+CLAUDE.local.md
