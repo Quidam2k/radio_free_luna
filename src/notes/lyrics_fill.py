@@ -7,6 +7,7 @@ import concurrent.futures as futures
 import email.utils
 import json
 import logging
+import os
 import random
 import re
 import sqlite3
@@ -20,10 +21,11 @@ from pathlib import Path
 from src.notes import store
 from src.notes.store import NotesStore, song_key, clean_song_title, is_generic_artist, _fold
 
-AUDIPLEX_DB = Path("Q:/Development/audiplex/server/audiplex.db")
-PROGRESS = Path("Q:/Development/radio_free_luna/logs/lyrics_fill_progress.jsonl")
+_ROOT = Path(__file__).resolve().parents[2]
+AUDIPLEX_DB = Path(os.getenv("AUDIPLEX_ROOT", str(_ROOT.parent / "audiplex"))) / "server" / "audiplex.db"
+PROGRESS = _ROOT / "logs" / "lyrics_fill_progress.jsonl"
 HEADERS = {
-    "User-Agent": "RadioFreeLuna/1.0 (personal home DJ; lyrics cache; https://github.com/toddcwalker)",
+    "User-Agent": "RadioFreeLuna/1.0 (personal home DJ; lyrics cache)",
     "Accept": "application/json",
 }
 
