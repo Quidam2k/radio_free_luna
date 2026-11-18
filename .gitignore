@@ -109,3 +109,5 @@ data/
 NOTE-*
 session-state.md
 CLAUDE.local.md
+# #6448 per-project inbox (transient pointers; pipeline DB is the record)
+inbox/

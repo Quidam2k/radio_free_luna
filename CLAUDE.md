@@ -237,3 +237,7 @@ This allows development and testing without all external services running.
 9. **Performance**: Database queries can be expensive with large music libraries. Use pagination and caching where appropriate.
 
 10. **Dependencies Location**: Pre-installed dependencies are in `lib/` directory. System should work without additional virtual environment for basic development.
+
+## Inbox (#6448)
+
+Asks and FYIs filed for this project land in `inbox/` at the project root, one markdown file each. **At the start of every session, list `inbox/*.md` and read any file there.** Act on it, then move the file to `inbox/done/`; never delete one. `inbox/` is gitignored.
