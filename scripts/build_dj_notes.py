@@ -154,6 +154,10 @@ def main(argv=None) -> int:
     ap.add_argument("--redo", action="store_true", help="re-enrich songs already stored")
     ap.add_argument("--redo-nomatch", action="store_true", help="retry songs stored as nomatch")
     ap.add_argument("--stats", action="store_true")
+    ap.add_argument("--forever", action="store_true",
+                    help="#4475: keep running under the service supervisor: a pass, then sleep and top up new songs")
+    ap.add_argument("--sleep-hours", type=float, default=6.0, help="--forever: hours between passes")
+    ap.add_argument("--below-normal", action="store_true", help="run at below-normal CPU priority (Windows)")
     args = ap.parse_args(argv)
 
     logging.basicConfig(
@@ -166,6 +170,27 @@ def main(argv=None) -> int:
         print(store.stats())
         return 0
 
+    if args.below_normal:
+        _below_normal()
+    while True:
+        _one_pass(store, args)
+        if not args.forever:
+            break
+        log.info("sleeping %.1f h before the next top-up pass", args.sleep_hours)
+        time.sleep(args.sleep_hours * 3600)
+    store.close()
+    return 0
+
+
+def _below_normal() -> None:
+    """#4475: a 45 h network-bound batch must never compete with the foreground."""
+    if os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+
+
+def _one_pass(store, args) -> None:
+    """Enrich every owed song once. Resumable: finished songs are skipped."""
     adb, bdb = Path(args.audiplex_db), Path(args.buckets_db)
     picked = []
     if args.played_since:
@@ -196,7 +221,11 @@ def main(argv=None) -> int:
     counts = {"ok": 0, "nomatch": 0, "error": 0}
     for i, (artist, title) in enumerate(todo, 1):
         try:
+            failed_before = enricher.client.transient_failures
             r = enricher.enrich(artist, title)
+            if r["status"] == "nomatch" and enricher.client.transient_failures > failed_before:
+                # #4475: a 503 is not a miss; 'error' is retried on the next pass.
+                r = {**r, "status": "error", "detail": "transient HTTP failure; retry"}
             store.save(artist, title, r["status"], r["facts"], detail=r["detail"], **r["ids"])
             counts[r["status"]] += 1
             log.info("[%d/%d] %s | %s - %s | %d facts", i, len(todo), r["status"],
@@ -212,8 +241,6 @@ def main(argv=None) -> int:
             log.info("progress %d/%d %s requests=%d eta=%.0f min", i, len(todo), counts,
                      enricher.client.requests, (len(todo) - i) / rate / 60)
     log.info("done %s store=%s", counts, store.stats())
-    store.close()
-    return 0
 
 
 if __name__ == "__main__":

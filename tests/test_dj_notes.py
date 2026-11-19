@@ -442,3 +442,22 @@ def test_original_album_prefers_older_album_that_really_had_the_song(monkeypatch
         "media": [{"tracks": [{"title": t} for t in tracks[i]]}]})
     got = enrich.original_album(None, recs, "Peace, Love and Understanding", "1987-07-13")
     assert got == ("1979-01-05", "Armed Forces")  # not the 1977 bonus-track album
+
+
+def test_http_client_counts_transient_failures_not_404(monkeypatch):
+    """#4475: a 503 after retries is counted (the song is retried later); a 404 is a real miss."""
+    import urllib.error
+    from src.notes import sources
+
+    codes = iter([503, 503, 503, 404])
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, next(codes), "x", {}, None)
+
+    monkeypatch.setattr(sources.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(sources.time, "sleep", lambda s: None)
+    client = sources.HttpClient(intervals={"example.org": 0.0})
+    assert client.get_json("https://example.org/a") is None
+    assert client.transient_failures == 1
+    assert client.get_json("https://example.org/b") is None
+    assert client.transient_failures == 1

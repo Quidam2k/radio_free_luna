@@ -33,6 +33,7 @@ class HttpClient:
         self.intervals = intervals or HOST_INTERVAL
         self._last: Dict[str, float] = {}
         self.requests = 0
+        self.transient_failures = 0  # #4475: 429/5xx/network after retries; not a real miss
 
     def get_json(self, url: str) -> Optional[Dict]:
         host = urllib.parse.urlsplit(url).netloc
@@ -52,12 +53,15 @@ class HttpClient:
                     continue
                 if e.code != 404:
                     logger.warning("HTTP %s for %s", e.code, url)
+                if e.code == 429 or e.code >= 500:
+                    self.transient_failures += 1
                 return None
             except Exception as e:  # network blip, bad JSON: fewer facts, never a crash
                 if attempt < 2:
                     time.sleep(2)
                     continue
                 logger.warning("fetch failed for %s: %s", url, e)
+                self.transient_failures += 1
                 return None
         return None
 
