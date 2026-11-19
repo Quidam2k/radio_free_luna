@@ -9,8 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Quick Start Commands
 
 ### Running the Application
+The live station runs under an external service supervisor (auto-restart, pullable logs); the local launch and restart commands live in `CLAUDE.local.md` (gitignored). The old launchers (`launch.bat`, `rfl_supervised.bat`, `setup.py`, `run_with_docker.sh`) are retired, in `archive/` (#3840, #5493). `scripts/rfl_supervisor.py` stays on disk but nothing launches it.
 ```bash
-# Start the AI DJ system
+# Dev only (the supervised copy already holds :8080)
 python main.py
 
 # Access web interface
@@ -92,7 +93,7 @@ isort src/
 
 1. **Initialization**: `python main.py` (RadioFreeLuna class) â†’ FastAPI app on port 8080
 2. **Music Scanning**: File monitor detects changes â†’ metadata extraction â†’ database storage
-3. **AI Analysis**: New tracks â†’ Genius API (lyrics) â†’ OpenAI (deep analysis) â†’ database cache
+3. **AI Analysis**: New tracks â†’ Genius API (lyrics) â†’ LLM analysis (`DJ_LLM` backend) â†’ database cache
 4. **Session Creation**: User request â†’ context_manager gathers context â†’ session_manager sequences tracks
 5. **DJ Commentary**: Track plays â†’ commentary_generator creates context-aware comments â†’ TTS-WebUI synthesizes voice
 6. **Audio Streaming**: Track audio â†’ AudioProcessor (normalization) â†’ crossfader (transitions) â†’ ffmpeg subprocess (MP3 encoding) â†’ per-listener asyncio queues via GET /stream.mp3
@@ -112,7 +113,7 @@ isort src/
 - **Framework**: FastAPI 0.104.1 + Uvicorn 0.24.0
 - **Database**: SQLAlchemy 2.0.23 (SQLite default, PostgreSQL/MySQL supported)
 - **Audio Processing**: pydub, mutagen (file decoding and metadata extraction)
-- **AI/Analytics**: OpenAI (GPT-4o-mini and beyond)
+- **AI/Analytics**: pluggable `DJ_LLM` backend in `src/dj/llm_backend.py` (live: `anthropic`); OpenAI optional
 - **Voice Synthesis**: TTS-WebUI client for high-quality synthesis
 - **Streaming**: HTTP chunked transfer via FastAPI; ffmpeg subprocess (libmp3lame) for real-time MP3 encoding
 - **File Monitoring**: watchdog
@@ -128,10 +129,11 @@ isort src/
 
 ### Environment Variables (.env)
 ```
-OPENAI_API_KEY=your_key_here          # For AI analysis and commentary (REQUIRED)
-OPENAI_MODEL=gpt-4o-mini              # OpenAI model for analysis and commentary
-DJ_LLM=openai                         # DJ commentary backend (#6019): openai | claude_cli
-DJ_LLM_MODEL=claude-sonnet-5-5        # model for DJ_LLM=claude_cli
+OPENAI_API_KEY=your_key_here          # Only for DJ_LLM=openai (optional; mock fallback)
+OPENAI_MODEL=gpt-4o-mini              # OpenAI model for DJ_LLM=openai
+DJ_LLM=anthropic                      # DJ text backend: openai (code default) | claude_cli | local | anthropic (LIVE value)
+DJ_LLM_MODEL=claude-sonnet-5-5        # model for claude_cli / anthropic
+# DJ_LLM=anthropic reads ANTHROPIC_API_KEY from env, else from the env file named by DJ_ANTHROPIC_ENV_FILE (#4154)
 AUTO_ANALYZE_TRACKS=true              # Background worker analyzes unanalyzed tracks into track_analysis
 ARCHIVE_BROADCASTS=false              # Record each broadcast to archives/<session>.mp3
 MUSIC_DIRECTORIES=/path/to/music      # Comma-separated music folders
@@ -149,7 +151,7 @@ STREAM_MOUNT=/ai_dj_stream            # Icecast2 stream mount (for legacy config
 **Note**: Icecast2 settings are preserved for legacy compatibility. Current streaming uses HTTP chunked transfer with ffmpeg MP3 encoding on port 8080 via `/stream.mp3`.
 
 ### Optional External Services
-- **OpenAI API**: For AI commentary (mock fallback available)
+- **OpenAI API**: only if `DJ_LLM=openai` (mock fallback available)
 - **TTS-WebUI**: For voice synthesis (can run without voice)
 - **Icecast2**: For real audio streaming (mock mode available)
 - **Genius API**: For lyrics fetching
@@ -180,7 +182,7 @@ Weather and geocoding use the keyless Open-Meteo APIs — no key or account need
 ### DJ Voice / Style (#6019)
 - `src/dj/chris_style.py` injects the Compact digest of `docs/dj/chris_style_guide.md` plus 3-4 few-shots (`data/corpus/chris_fewshot.jsonl`, gitignored; rebuild with `scripts/build_chris_fewshot.py`) into every DJ system prompt. Both are optional (fail-open).
 - Facts about songs come only from the DJ-notes store (`_facts_block` → `src.notes.store.lookup`).
-- Text backend: `DJ_LLM=openai` (default) or `DJ_LLM=claude_cli` (`claude -p`, model `DJ_LLM_MODEL`, default claude-sonnet-5-5, windowless) in `src/dj/llm_backend.py`.
+- Text backend in `src/dj/llm_backend.py`: `DJ_LLM=openai` (code default), `claude_cli` (`claude -p`, windowless), `local` (LM Studio, #6914) or `anthropic` (Messages API, own key, #4154; **the live value in `.env`**). Model `DJ_LLM_MODEL`, default claude-sonnet-5-5.
 
 ### Context Awareness System
 The system intelligently reacts to:
@@ -216,13 +218,27 @@ This allows development and testing without all external services running.
 - `GET /api/streaming/status` - Detailed broadcaster state
 - `GET /docs` - Swagger API documentation
 
+## Library & Offline Pipelines (#5493)
+
+**Library size:** `tracks` holds ~74,200 rows (2026-11-18; ~13,000 analyzed in `track_analysis`). Older notes that say 2,210 are stale.
+
+Offline scripts in `scripts/` (none run on a schedule; each is run by hand or by an agent worker):
+- **DJ notes build:** `build_dj_notes.py`: sourced song facts for the library (ride-mix folders first, #6006) -> `data/dj_notes.db`; read by `src/notes/store.py` and the external DJ bridge (`rfl_track_notes`).
+- **Theme batch:** `theme_batch.py`: classify songs by meaning through themed Message Batches (#949), e.g. `submit halloween --dry-run`.
+- **Practice:** `dj_practice.py`: stockpile off-air DJ breaks for reuse (#4164).
+- **Bridge eval:** `eval_dj_bridges.py`: compare transition bridges across backends (local vs Haiku vs Sonnet, #6914).
+- **Mixdown:** `render_mix.py`: render a crate into one continuous mix (pipeline #1002). Public output, so the voice-clone guardrail applies.
+- **Northern Exposure / Chris corpus:** `ingest_ne_subs.py` (DVD subs) and `transcribe_ne.py` (the owner's own rips) -> `build_ne_indexes.py` -> `extract_chris.py` -> `build_chris_fewshot.py` (`data/corpus/`, gitignored).
+
+`notes/` and `cascades/` are gitignored on branch `clean-release-2026`.
+
 ## Important Notes for Future Development
 
 1. **Always use async/await**: FastAPI is async-first. Use `async def` for endpoint handlers and async libraries (aiohttp, asyncpg).
 
 2. **Database Queries**: Use SQLAlchemy with async session management. New connections go through `SessionLocal()`.
 
-3. **AI Caching**: Before making OpenAI API calls, check if analysis already exists in database to save costs.
+3. **AI Caching**: Before making LLM API calls, check if analysis already exists in database to save costs.
 
 4. **Error Handling**: Implement graceful fallbacks for all external services. Never crash because an API is unavailable.
 
