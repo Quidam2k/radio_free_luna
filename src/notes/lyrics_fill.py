@@ -30,24 +30,17 @@ HEADERS = {
 }
 
 
-def load_songs(path: Path) -> list[dict]:
+def _group_songs(rows) -> list[dict]:
+    """(artist, title, album, seconds) rows -> one song per song_key, modal duration."""
     groups = {}
-    db = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
-    try:
-        for artist, title, album, duration in db.execute("""
-            SELECT ar.name, t.title, al.title, t.duration_seconds
-            FROM tracks t JOIN artists ar ON ar.id=t.artist_id
-            JOIN albums al ON al.id=t.album_id WHERE t.content_kind='music'
-        """):
-            if not clean_song_title(title, artist):
-                continue
-            key = song_key(artist, title)
-            song, counts = groups.setdefault(key, (
-                dict(key=key, artist=artist, title=title, album=album), {}))
-            seconds = max(0, round(float(duration or 0)))
-            counts[seconds] = counts.get(seconds, 0) + 1
-    finally:
-        db.close()
+    for artist, title, album, duration in rows:
+        if not clean_song_title(title, artist):
+            continue
+        key = song_key(artist, title)
+        song, counts = groups.setdefault(key, (
+            dict(key=key, artist=artist, title=title, album=album), {}))
+        seconds = max(0, round(float(duration or 0)))
+        counts[seconds] = counts.get(seconds, 0) + 1
     songs, skipped = [], 0
     for key in sorted(groups):
         song, counts = groups[key]
@@ -58,6 +51,38 @@ def load_songs(path: Path) -> list[dict]:
         songs.append(song)
     logging.info("Loaded %d songs; skipped %d generic-artist keys", len(songs), skipped)
     return songs
+
+
+def _read_rows(path: Path, sql: str) -> list[tuple]:
+    db = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    try:
+        return db.execute(sql).fetchall()
+    finally:
+        db.close()
+
+
+def load_songs(path: Path) -> list[dict]:
+    return _group_songs(_read_rows(path, """
+        SELECT ar.name, t.title, al.title, t.duration_seconds
+        FROM tracks t JOIN artists ar ON ar.id=t.artist_id
+        JOIN albums al ON al.id=t.album_id WHERE t.content_kind='music'
+    """))
+
+
+def load_rfl_songs(path: Path) -> list[dict]:
+    """RFL's own library (#3982): tracks(artist, title, album, duration seconds)."""
+    return _group_songs(_read_rows(
+        path, "SELECT artist, title, album, duration FROM tracks "
+               "WHERE artist IS NOT NULL AND title IS NOT NULL"))
+
+
+def load_library(audiplex_db: Path | None, rfl_db: Path | None = None) -> list[dict]:
+    """Union of both libraries by song_key; Audiplex wins a shared key."""
+    songs = {}
+    for loader, path in ((load_rfl_songs, rfl_db), (load_songs, audiplex_db)):
+        if path:
+            songs.update((song["key"], song) for song in loader(Path(path)))
+    return [songs[key] for key in sorted(songs)]
 
 
 # '01.21. Sigue Sigue Sputnik', '(01)Tom Waits', '02 (Martinique) Kali'. A bare leading
@@ -199,6 +224,8 @@ def report(done: int, total: int, counts: dict, started: float) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audiplex-db", type=Path, default=AUDIPLEX_DB)
+    parser.add_argument("--rfl-db", type=Path, default=None,
+                        help="also cover RFL's own library, e.g. data/radio_free_luna.db")
     parser.add_argument("--notes-db", type=Path, default=store.DEFAULT_DB)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--limit", type=int)
@@ -213,7 +240,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     notes = NotesStore(args.notes_db)
     songs = []
-    for song in load_songs(args.audiplex_db):
+    for song in load_library(args.audiplex_db, args.rfl_db):
         status = notes.lyrics_status(song["key"])
         if status is None or (status == "error" and args.retry_errors):
             songs.append(song)

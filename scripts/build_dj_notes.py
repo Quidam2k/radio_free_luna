@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.notes.enrich import SongEnricher  # noqa: E402
-from src.notes.store import DEFAULT_DB, NotesStore, song_key  # noqa: E402
+from src.notes.store import DEFAULT_DB, NotesStore, is_generic_artist, song_key  # noqa: E402
 
 _AUDIPLEX_ROOT = Path(os.getenv("AUDIPLEX_ROOT", str(ROOT.parent / "audiplex")))
 AUDIPLEX_DB = _AUDIPLEX_ROOT / "server" / "audiplex.db"
@@ -66,6 +66,16 @@ def _tracks(db: Path):
     rows = conn.execute(_TRACK_SQL).fetchall()
     conn.close()
     return rows
+
+
+def rfl_songs(db: Path):
+    """[(artist, title)] from RFL's own tracks table (#3982), most-played first."""
+    conn = _ro(db)
+    rows = conn.execute("SELECT artist, title FROM tracks "
+                        "ORDER BY COALESCE(play_count, 0) DESC, id").fetchall()
+    conn.close()
+    return _dedupe((a, t) for a, t in rows
+                   if a and t and not is_generic_artist(a))
 
 
 def library_songs(db: Path, folders=None):
@@ -147,6 +157,8 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int)
     ap.add_argument("--db", default=str(DEFAULT_DB))
     ap.add_argument("--audiplex-db", default=str(AUDIPLEX_DB))
+    ap.add_argument("--rfl-db", help="also enrich RFL's own library (data/radio_free_luna.db), #3982")
+    ap.add_argument("--artist", help="only songs whose artist contains this text (case-insensitive)")
     ap.add_argument("--played-since", help="songs played in Audiplex since YYYY-MM-DD")
     ap.add_argument("--mix-spec", help="an Audiplex dj_mix_specs name, e.g. todd-ride-mix")
     ap.add_argument("--buckets", help="comma-separated Audiplex DJ bucket names")
@@ -204,6 +216,11 @@ def _one_pass(store, args) -> None:
     else:
         folders = None if args.all else (args.folders.split(",") if args.folders else RIDE_FOLDERS)
         songs = library_songs(adb, folders)
+    if args.rfl_db:
+        songs = _dedupe(songs + rfl_songs(Path(args.rfl_db)))
+    if args.artist:
+        needle = args.artist.casefold()
+        songs = [s for s in songs if needle in (s[0] or "").casefold()]
 
     def owed(song):
         key = song_key(*song)

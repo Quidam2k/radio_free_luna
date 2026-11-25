@@ -6,6 +6,7 @@ Run: python -m src.notes.lyrics_dump_import --dump H:/lrclib/lrclib.sqlite3
 
 import argparse
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -13,7 +14,7 @@ from contextlib import closing
 from pathlib import Path
 
 from src.notes.lyrics_fill import (
-    AUDIPLEX_DB, PROGRESS, flush, load_songs, query_artist, report,
+    AUDIPLEX_DB, PROGRESS, flush, load_library, query_artist, report,
 )
 from src.notes.store import DEFAULT_DB, NotesStore, norm_artist, norm_title
 
@@ -29,8 +30,46 @@ Candidate = tuple[int, float | None, int]
 Lyric = tuple[str | None, str | None, int | None]
 
 
+# #3982: gate for the long H: scan and RFL as a song source.
+def tick_delta(now_ms: int, then_ms: int) -> int:
+    """Milliseconds between two 32-bit tick counts, correct across the 49.7-day wrap."""
+    return (now_ms - then_ms) & 0xFFFFFFFF
+
+
+def input_idle_seconds() -> float:
+    """Seconds since Todd last touched the keyboard or mouse (Windows); inf elsewhere."""
+    if os.name != "nt":
+        return float("inf")
+    import ctypes
+
+    class LASTINPUTINFO(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+    info = LASTINPUTINFO(ctypes.sizeof(LASTINPUTINFO), 0)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        return float("inf")
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetTickCount.restype = ctypes.c_uint32  # default c_int goes negative at 24.9 days
+    return tick_delta(kernel32.GetTickCount(), info.dwTime) / 1000.0
+
+
+def make_gate(min_idle: float):
+    """Return a callable that blocks while Todd is at the machine (idle < min_idle s)."""
+    def gate() -> None:
+        paused = False
+        while min_idle and input_idle_seconds() < min_idle:
+            if not paused:
+                logging.info("Todd is active; scan paused")
+                paused = True
+            time.sleep(30)
+        if paused:
+            logging.info("Scan resumed")
+    return gate
+
+
 def scan_tracks(db: sqlite3.Connection,
-                wanted: dict[MatchKey, list[dict]]) -> dict[MatchKey, list[Candidate]]:
+                wanted: dict[MatchKey, list[dict]],
+                gate=lambda: None) -> dict[MatchKey, list[Candidate]]:
     candidates: dict[MatchKey, list[Candidate]] = {}
     started, scanned = time.monotonic(), 0
     with closing(db.cursor()) as cursor:
@@ -39,7 +78,11 @@ def scan_tracks(db: sqlite3.Connection,
             "SELECT id, artist_name, name, duration, last_lyrics_id "
             "FROM tracks WHERE last_lyrics_id IS NOT NULL"
         )
-        while batch := cursor.fetchmany(50000):
+        while True:
+            gate()  # the scan reads a USB HDD for an hour; yield when Todd is at the box
+            batch = cursor.fetchmany(50000)
+            if not batch:
+                break
             for track_id, artist, title, duration, lyrics_id in batch:
                 key = match_key(artist, title)
                 if key in wanted:
@@ -56,11 +99,13 @@ def scan_tracks(db: sqlite3.Connection,
 
 
 def load_lyrics(db: sqlite3.Connection,
-                candidates: dict[MatchKey, list[Candidate]]) -> dict[int, Lyric]:
+                candidates: dict[MatchKey, list[Candidate]],
+                gate=lambda: None) -> dict[int, Lyric]:
     ids = sorted({c[2] for group in candidates.values() for c in group})
     lyrics: dict[int, Lyric] = {}
     with closing(db.cursor()) as cursor:
         for offset in range(0, len(ids), 500):
+            gate()
             chunk = ids[offset:offset + 500]
             placeholders = ",".join("?" for _ in chunk)
             cursor.execute(
@@ -89,12 +134,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dump", type=Path, required=True)
     parser.add_argument("--audiplex-db", type=Path, default=AUDIPLEX_DB)
+    parser.add_argument("--rfl-db", type=Path, default=None,
+                        help="also cover RFL's own library, e.g. data/radio_free_luna.db")
     parser.add_argument("--notes-db", type=Path, default=DEFAULT_DB)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--min-idle", type=float, default=0,
+                        help="pause the scan while keyboard/mouse idle < N seconds (0 = never)")
+    parser.add_argument("--below-normal", action="store_true",
+                        help="run at below-normal CPU priority (Windows)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    library = load_songs(args.audiplex_db)
+    if args.below_normal and os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(
+            ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)
+    library = load_library(args.audiplex_db, args.rfl_db)  # #3982
     p = args.dump.resolve()
     with closing(sqlite3.connect(
             f"file:{p.as_posix()}?mode=ro&immutable=1", uri=True)) as dump:
@@ -118,8 +173,9 @@ def main() -> int:
             buffer: list[dict] = []
             started, done, interrupted = time.monotonic(), 0, False
             try:
-                candidates = scan_tracks(dump, wanted) if wanted else {}
-                lyrics = load_lyrics(dump, candidates)
+                gate = make_gate(args.min_idle)
+                candidates = scan_tracks(dump, wanted, gate) if wanted else {}
+                lyrics = load_lyrics(dump, candidates, gate)
                 for key, songs in wanted.items():
                     options = [c for c in candidates.get(key, []) if c[2] in lyrics]
                     for song in songs:
